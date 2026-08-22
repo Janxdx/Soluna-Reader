@@ -26,6 +26,50 @@ Sections that are now history rather than pending work:
 - **Supabase removed; D1 schema now deploys itself** (below).
 - **renamed from Lumen to Soluna** (below).
 
+## How much longer, and how much today
+
+Two small additions, both to numbers that already existed somewhere and
+could not be read where they were wanted.
+
+**The chapter countdown is now on screen while you read it.** The bottom
+chrome has carried "12m to next chapter" since the pace estimate landed,
+and the chrome is hidden for the whole of the act it describes — you hide
+it in order to read — so the number was only ever available to someone who
+had stopped. `.chapter-left` in `Reader.tsx` is the same two values
+(`chapterLeft`, `lastChapter`) drawn as a pill in the outer corner, where a
+printed book keeps its folio. It stands down when the chrome comes up
+rather than saying the same thing twice a few pixels apart, and it is
+`pointer-events: none` because it overlaps the right tap zone — a countdown
+that swallowed page turns would be a bad trade for a number.
+
+**`dayTotal()` in `stats.ts`** is today's reading, and it is built on
+`byDay` rather than filtering by timestamp so that a day means what it
+means everywhere else in the app: local midnight to local midnight, the
+session credited to the day it *started* on. That last part is the whole
+reason it is worth a test — an evening that runs past midnight is one
+evening, and splitting it would make the Today card disagree with both the
+streak and the last bar of the chart.
+
+**The daily bars answer for one day at a time.** Printing thirty numbers
+under the chart would destroy the shape that is the point of drawing it,
+so the number is on demand: hover with a pointer, hold with a finger.
+Three things worth not re-deriving:
+
+- **The hit target is one transparent strip over the SVG, not the `rect`s.**
+  A day with no reading is a zero-height bar and a quiet day is barely
+  more, so hit-testing the drawing makes exactly the days you most want to
+  interrogate the ones you cannot hit.
+- **The day is resolved from `clientX` against the strip's own rect**, not
+  from a per-cell `onPointerEnter`. Touch takes implicit pointer capture on
+  the element where the press began, so per-cell handlers fire once and a
+  finger dragged along the month reads back the day it started on for the
+  whole gesture.
+- **`touch-action: pan-y` on the strip** is what keeps the page scrollable
+  through the chart. A vertical drag scrolls, and the browser says so by
+  cancelling the pointer, which is what clears the readout.
+
+No schema change and nothing persisted, so `npm run db:local` is not needed.
+
 ## What a book looks like in the world (covers, spines, Wikipedia)
 
 The shelf now draws two ways, and the toggle in the ratings tab is a real

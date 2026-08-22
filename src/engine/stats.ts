@@ -30,6 +30,12 @@ export interface DayBucket {
   words: number;
 }
 
+/** A day with the detail a single-day readout wants. */
+export interface DayTotal extends DayBucket {
+  sessions: number;
+  pages: number;
+}
+
 export const dayKey = (t: number | Date): string => {
   const d = t instanceof Date ? t : new Date(t);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(
@@ -98,6 +104,30 @@ export function lastDays(sessions: Session[], days: number): DayBucket[] {
     const key = dayKey(cursor);
     out.push(map.get(key) ?? { key, date: new Date(cursor), ms: 0, words: 0 });
     cursor.setDate(cursor.getDate() + 1);
+  }
+  return out;
+}
+
+/**
+ * One calendar day's reading — today unless another day is named.
+ *
+ * `lastDays` already buckets a window and `byDay` already buckets
+ * everything, but the question "how much have I read today" is asked from
+ * places that want neither: the number, not the window around it. Built on
+ * `byDay` so a day means exactly what it means everywhere else — local
+ * midnight to local midnight, the session credited to the day it started
+ * on, which is why an evening that runs past midnight stays one evening.
+ */
+export function dayTotal(sessions: Session[], when: number | Date = Date.now()): DayTotal {
+  const key = dayKey(when);
+  const date = when instanceof Date ? new Date(when) : new Date(when);
+  const out: DayTotal = { key, date, ms: 0, words: 0, sessions: 0, pages: 0 };
+  for (const s of sessions) {
+    if (dayKey(s.start) !== key) continue;
+    out.ms += s.ms;
+    out.words += s.words;
+    out.pages += s.pages;
+    out.sessions++;
   }
   return out;
 }

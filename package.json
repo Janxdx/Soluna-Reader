@@ -13,7 +13,7 @@
     "db:local": "wrangler d1 execute soluna --local --file worker/schema.sql",
     "db:remote": "wrangler d1 execute soluna --remote --file worker/schema.sql",
     "predeploy": "npm run db:remote",
-    "test": "node --import ./tests/register.mjs tests/device-math.test.mts && node --import ./tests/register.mjs tests/device-store.test.mts && node --import ./tests/register.mjs tests/sync-merge.test.mts && node --import ./tests/register.mjs tests/passage-match.test.mts && node --import ./tests/register.mjs tests/rating.test.mts && node --import ./tests/register.mjs tests/rating-store.test.mts && node --import ./tests/register.mjs tests/passage-store.test.mts && node --import ./tests/register.mjs tests/pace.test.mts && node --import ./tests/register.mjs tests/edition.test.mts && node --import ./tests/register.mjs tests/sw.test.mts"
+    "test": "node --import ./tests/register.mjs tests/device-math.test.mts && node --import ./tests/register.mjs tests/device-store.test.mts && node --import ./tests/register.mjs tests/sync-merge.test.mts && node --import ./tests/register.mjs tests/passage-match.test.mts && node --import ./tests/register.mjs tests/rating.test.mts && node --import ./tests/register.mjs tests/rating-store.test.mts && node --import ./tests/register.mjs tests/passage-store.test.mts && node --import ./tests/register.mjs tests/pace.test.mts && node --import ./tests/register.mjs tests/day-total.test.mts && node --import ./tests/register.mjs tests/edition.test.mts && node --import ./tests/register.mjs tests/sw.test.mts"
   },
   "dependencies": {
     "@simplewebauthn/browser": "^13.3.0",

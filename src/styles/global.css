@@ -594,6 +594,43 @@ body::after {
   right: 0;
 }
 
+/* The chapter countdown that stays put while the chrome is away.
+   Sized and coloured to be readable at a glance and ignorable otherwise —
+   it is on screen for hours at a time. */
+.chapter-left {
+  position: absolute;
+  z-index: 30;
+  right: calc(var(--safe-r) + var(--s4));
+  bottom: calc(var(--safe-b) + var(--s3));
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: var(--r-full);
+  background: var(--glass);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--ink-3);
+  /* it overlaps the right tap zone; the page turn must win */
+  pointer-events: none;
+  transition: opacity var(--t-chrome) var(--ease-out),
+    transform var(--t-chrome) var(--ease-out);
+}
+.chapter-left b {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  font-size: 12.5px;
+  font-weight: 620;
+  color: var(--ink-2);
+}
+/* the bottom chrome says the same thing when it is up */
+.chapter-left.hidden {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
 /* reader chrome */
 .chrome {
   position: absolute;
@@ -1079,6 +1116,58 @@ input[type='range']::-moz-range-thumb {
   height: 76px;
   display: block;
   overflow: visible;
+}
+
+/* Daily bars, with the held day's number floating above them.
+   The row reserves the readout's height so that showing one never moves
+   the chart underneath it. */
+.daybars {
+  position: relative;
+  padding-top: 30px;
+  margin-top: -12px;
+}
+.daybars .hits {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 76px;
+  /* a vertical drag still scrolls the page; the browser cancels the
+     pointer when it takes over, which clears the readout */
+  touch-action: pan-y;
+  cursor: crosshair;
+}
+.daybars .tip {
+  position: absolute;
+  top: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+  padding: 4px 10px;
+  border-radius: var(--r-full);
+  background: var(--ink);
+  color: var(--bg);
+  box-shadow: var(--shadow-1);
+  font-size: 11px;
+  pointer-events: none;
+  animation: tipin 140ms var(--ease-out);
+}
+.daybars .tip b {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 640;
+}
+.daybars .tip span {
+  opacity: 0.62;
+}
+/* opacity only — the element's transform is its horizontal placement, and
+   animating it here would fight the inline value and snap on entry */
+@keyframes tipin {
+  from {
+    opacity: 0;
+  }
 }
 
 /* toast */

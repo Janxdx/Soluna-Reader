@@ -4,6 +4,7 @@ import {
   byDay,
   byHour,
   dayKey,
+  dayTotal,
   formatCount,
   formatDuration,
   lastDays,
@@ -20,6 +21,7 @@ export function Stats() {
   const { sessions, books, progress } = useLibrary();
 
   const t = useMemo(() => totals(sessions), [sessions]);
+  const today = useMemo(() => dayTotal(sessions), [sessions]);
   const days30 = useMemo(() => lastDays(sessions, 30), [sessions]);
   const hours = useMemo(() => byHour(sessions), [sessions]);
   const trend = useMemo(() => wpmTrend(sessions), [sessions]);
@@ -90,6 +92,21 @@ export function Stats() {
         </h1>
 
         <div className="stat-grid">
+          {/* first, because it is the only number that is still moving */}
+          <div className="card">
+            <div className="k">Today</div>
+            <div className="v num">{formatDuration(today.ms)}</div>
+            <div className="sub">
+              {today.ms > 0
+                ? `${formatCount(today.words)} words · ${today.sessions} ${
+                    today.sessions === 1 ? 'session' : 'sessions'
+                  }`
+                : t.streak > 0
+                ? `nothing yet · ${t.streak} ${t.streak === 1 ? 'day' : 'days'} on the line`
+                : 'nothing yet today'}
+            </div>
+          </div>
+
           <div className="card">
             <div className="k">Current streak</div>
             <div className="v num" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -169,6 +186,7 @@ export function Stats() {
             }}
           >
             <span>{days30[0]?.date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>
+            <span>hold a bar for its day</span>
             <span>today</span>
           </div>
         </div>

@@ -4,33 +4,125 @@
    keeps the visual language exactly consistent with the rest of the app
    (same accent, same corner radii, same restraint). */
 
-import { AXES, MOODS, moodColor, type AxisKey, type MoodShare } from '../engine/rating';
-import type { DayBucket } from '../engine/stats';
+import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 
-/** Minutes-per-day columns. */
+import { AXES, MOODS, moodColor, type AxisKey, type MoodShare } from '../engine/rating';
+import { formatDuration, type DayBucket } from '../engine/stats';
+
+/**
+ * Minutes-per-day columns, with a day readable off any one of them.
+ *
+ * A bar chart of thirty days answers "which evenings" and refuses to answer
+ * "how long on that evening" — the shape is the whole point, and printing
+ * thirty numbers under it would destroy the shape to answer a question you
+ * only ask about one day at a time. So the number is on demand: hover with
+ * a pointer, hold with a finger.
+ *
+ * The hit target is one transparent strip laid over the SVG rather than the
+ * `rect`s themselves. A bar for a day with no reading is one pixel tall and
+ * a bar for a quiet day only slightly more, so hit-testing the drawing would
+ * make exactly the days you most want to interrogate the ones you cannot
+ * hit. The strip is full height and the day is resolved from where along it
+ * you are, which is also what lets a finger drag across the month and read
+ * every day in turn.
+ *
+ * `touch-action: pan-y` on the row is what keeps the page scrollable
+ * through the chart: a vertical drag that starts on a bar scrolls, and the
+ * browser tells us so by cancelling the pointer, which clears the readout.
+ */
 export function DailyBars({ days }: { days: DayBucket[] }) {
+  const [active, setActive] = useState<number | null>(null);
+  const rowRef = useRef<HTMLDivElement>(null);
+
   const max = Math.max(1, ...days.map((d) => d.ms));
   const w = 100 / days.length;
-  return (
-    <svg className="spark" viewBox="0 0 100 34" preserveAspectRatio="none" role="img">
-      {days.map((d, i) => {
-        const h = (d.ms / max) * 30;
-        return (
-          <rect
-            key={d.key}
-            x={i * w + w * 0.18}
-            y={32 - h}
-            width={w * 0.64}
-            height={Math.max(d.ms > 0 ? 1.2 : 0, h)}
-            rx={Math.min(0.9, w * 0.3)}
-            fill="var(--accent)"
-            opacity={d.ms > 0 ? 0.9 : 0.18}
-          />
-        );
-      })}
-      <line x1="0" y1="32.6" x2="100" y2="32.6" stroke="var(--line)" strokeWidth="0.4" />
-    </svg>
+
+  /* Resolve from geometry, not from a per-cell handler: a finger dragged
+     along the row keeps sending its moves to the cell it started on
+     (implicit pointer capture on touch), so per-cell `onPointerEnter`
+     would only ever fire once. */
+  const at = useCallback(
+    (clientX: number): number | null => {
+      const rect = rowRef.current?.getBoundingClientRect();
+      if (!rect || rect.width <= 0) return null;
+      const i = Math.floor(((clientX - rect.left) / rect.width) * days.length);
+      return i >= 0 && i < days.length ? i : null;
+    },
+    [days.length]
   );
+
+  const track = (e: ReactPointerEvent<HTMLDivElement>) => setActive(at(e.clientX));
+  const clear = () => setActive(null);
+  const onMove = (e: ReactPointerEvent<HTMLDivElement>) => {
+    // a mouse tracks on hover; a finger only once it is held down
+    if (e.pointerType === 'mouse' || e.buttons > 0) track(e);
+  };
+
+  const shown = active !== null && active < days.length ? { i: active, day: days[active] } : null;
+
+  return (
+    <div className="daybars">
+      {shown && (
+        <div
+          className="tip"
+          style={{
+            left: `${(shown.i + 0.5) * w}%`,
+            // the two ends would otherwise hang off the panel
+            transform: `translateX(${nudge(shown.i, days.length)})`,
+          }}
+        >
+          <b>{shown.day.ms > 0 ? formatDuration(shown.day.ms, true) : 'no reading'}</b>
+          <span>
+            {shown.day.date.toLocaleDateString(undefined, {
+              weekday: 'short',
+              day: 'numeric',
+              month: 'short',
+            })}
+          </span>
+        </div>
+      )}
+
+      <svg className="spark" viewBox="0 0 100 34" preserveAspectRatio="none" role="img">
+        {days.map((d, i) => {
+          const h = (d.ms / max) * 30;
+          const on = i === shown?.i;
+          return (
+            <rect
+              key={d.key}
+              x={i * w + w * 0.18}
+              y={32 - h}
+              width={w * 0.64}
+              /* a day with no reading draws nothing — except while it is
+                 the one being held, where a mark under the readout is
+                 what says which day that is */
+              height={Math.max(d.ms > 0 || on ? 1.2 : 0, h)}
+              rx={Math.min(0.9, w * 0.3)}
+              fill={on ? 'var(--ink)' : 'var(--accent)'}
+              opacity={on ? 1 : d.ms > 0 ? 0.9 : 0.18}
+            />
+          );
+        })}
+        <line x1="0" y1="32.6" x2="100" y2="32.6" stroke="var(--line)" strokeWidth="0.4" />
+      </svg>
+
+      <div
+        className="hits"
+        ref={rowRef}
+        onPointerDown={track}
+        onPointerMove={onMove}
+        onPointerUp={clear}
+        onPointerCancel={clear}
+        onPointerLeave={clear}
+      />
+    </div>
+  );
+}
+
+/** Keep the readout inside the panel when the day is near either end. */
+function nudge(i: number, count: number): string {
+  if (i < count * 0.15) return '-14%';
+  if (i > count * 0.85) return '-86%';
+  return '-50%';
 }
 
 /** WPM over successive sessions. */
