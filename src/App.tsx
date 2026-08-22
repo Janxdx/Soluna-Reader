@@ -6,6 +6,7 @@ import { initSync, useSync } from './sync/sync';
 import { syncEnabled } from './sync/client';
 import { useDevice } from './store/device';
 import { useRatings } from './store/ratings';
+import { useEditions } from './store/editions';
 import { Library } from './ui/Library';
 import { Stats } from './ui/Stats';
 import { Account } from './ui/Account';
@@ -45,6 +46,10 @@ export default function App() {
   useEffect(() => {
     void load();
     void useRatings.getState().load();
+    /* Cached editions, so a shelf that has already found its covers draws
+       complete on the first frame instead of popping in. Nothing is
+       fetched here — this only reads what is already on disk. */
+    void useEditions.getState().load();
   }, [load]);
 
   /* The device shelf loads alongside the library, and every time the library

@@ -3,6 +3,7 @@ import type { BookMeta, SpineEntry, TocEntry } from '../engine/types';
 import type { Session } from '../engine/stats';
 import type { RatingRecord } from '../engine/rating';
 import type { PackedPassageIndex } from '../engine/passageStore';
+import type { EditionData } from '../engine/edition';
 
 export interface BookRecord {
   id: string;
@@ -161,6 +162,44 @@ export interface PassageIndexRecord {
   usedAt: number;
 }
 
+/* ── editions ──────────────────────────────────────────────────────
+   What a book looks like in the world: publisher, page count, cover image,
+   the colours of that cover, and the opening of its Wikipedia article.
+
+   Derived public data, so it sits beside `passages` rather than beside the
+   reading tables — outside sync and outside tombstones. Not because it is
+   cheap to rebuild (it costs a network round trip, unlike a passage index)
+   but because rebuilding it is *free to the user*: the server caches every
+   answer in `edition_cache` for good, so a second iPad asking for the same
+   key gets it from D1 without any catalogue being troubled. Syncing rows
+   would move the same bytes through more machinery for the same result.
+
+   Keyed by `editionKey(title, author)`, not by book id, which is what lets
+   one row serve the library shelf, the device shelf, and a rating whose
+   book was deleted years ago. */
+
+export interface EditionRecord {
+  /** `editionKey(title, author)` from engine/edition.ts */
+  key: string;
+  /** Which build of the client wrote this row — see `EXTRACT_VERSION` in
+      meta/editions.ts. A cached row is only as good as the code that made
+      it, and the palette extractor has already shipped one bug that made
+      every vivid cover come back with no colours at all. Because this
+      table is a cache and nothing else, a row from an older extractor can
+      simply be treated as absent and fetched again; the alternative is a
+      fix that only helps books rated after it. */
+  v?: number;
+  data: EditionData;
+  /** cover bytes, held raw for the reason spelled out on CoverRecord above */
+  cover?: ArrayBuffer;
+  coverType?: string;
+  fetchedAt: number;
+  /** last time a shelf asked for it, for LRU eviction */
+  usedAt: number;
+  /** approximate bytes, what the eviction policy sorts on */
+  size: number;
+}
+
 /** A record deleted locally, kept until the deletion has reached the server. */
 export interface TombstoneRecord {
   /** `${table}:${uid}` */
@@ -186,6 +225,7 @@ class SolunaDB extends Dexie {
   deviceSessions!: Table<DeviceSessionRecord, number>;
   ratings!: Table<RatingRecord, string>;
   passages!: Table<PassageIndexRecord, string>;
+  editions!: Table<EditionRecord, string>;
 
   constructor() {
     super('soluna');
@@ -289,6 +329,27 @@ class SolunaDB extends Dexie {
       deviceSessions: '++id, deviceBookId, start, &uid, updatedAt',
       ratings: 'id, bookId, deviceBookId, ratedAt, overall, updatedAt',
       passages: 'bookId, usedAt',
+    });
+
+    /* v6 adds the edition cache — covers, publishers and Wikipedia teasers,
+       keyed by title-and-author rather than by book id. Second table in
+       this database holding no user data, and outside sync for the same
+       reason as `passages`: see the note on EditionRecord. Nothing else
+       changes shape, so there is no upgrade body. */
+    this.version(6).stores({
+      books: 'id, addedAt, finishedAt, updatedAt',
+      files: 'bookId',
+      covers: 'bookId',
+      progress: 'bookId, updatedAt',
+      sessions: '++id, bookId, start, &uid',
+      bookmarks: '++id, bookId, createdAt, &uid, updatedAt',
+      settings: 'key',
+      tombstones: 'key, at',
+      deviceBooks: 'id, addedAt, updatedAt, bookId',
+      deviceSessions: '++id, deviceBookId, start, &uid, updatedAt',
+      ratings: 'id, bookId, deviceBookId, ratedAt, overall, updatedAt',
+      passages: 'bookId, usedAt',
+      editions: 'key, usedAt, fetchedAt',
     });
   }
 }
@@ -450,6 +511,25 @@ export async function trimPassageCache(
   for (const row of rows) {
     if (total <= budget) break;
     await db.passages.delete(row.bookId);
+    total -= row.size;
+  }
+}
+
+/** Bytes held by cached editions. A cover is 60–200 kB and a shelf is a few
+    hundred books at the outside, so this is generous by design: the shelf
+    is the screen these are for, and evicting one means it draws a grey
+    rectangle where a book used to be. */
+export const EDITION_CACHE_BUDGET = 48 * 1024 * 1024;
+
+/** Drop least-recently-used editions until the cache fits its budget. */
+export async function trimEditionCache(
+  budget = EDITION_CACHE_BUDGET
+): Promise<void> {
+  const rows = await db.editions.orderBy('usedAt').toArray(); // oldest first
+  let total = rows.reduce((a, r) => a + r.size, 0);
+  for (const row of rows) {
+    if (total <= budget) break;
+    await db.editions.delete(row.key);
     total -= row.size;
   }
 }

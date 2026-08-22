@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { DEFAULT_PACER, type PacerConfig } from '../engine/pacer';
+import type { ShelfMode } from '../engine/spine';
 
 export type Theme = 'paper' | 'sepia' | 'ink';
 export type ThemeMode = Theme | 'auto';
@@ -18,6 +19,11 @@ export interface Settings {
   autoTurn: boolean;
   keepAwake: boolean;
   pacer: PacerConfig;
+  /** how the rating shelf draws its spines — see engine/spine.ts. Lives
+      here rather than in the tab's own state because it is a way of
+      looking at your reading, and resetting it on every visit would make
+      it feel like a toy rather than a choice. */
+  shelfMode: ShelfMode;
 
   set<K extends keyof Settings>(key: K, value: Settings[K]): void;
   setPacer(patch: Partial<PacerConfig>): void;
@@ -36,6 +42,11 @@ export const useSettings = create<Settings>()(
       autoTurn: true,
       keepAwake: true,
       pacer: { ...DEFAULT_PACER },
+      /* Defaults to the data shelf: it is what the tab has always shown, it
+         needs no network, and the realistic one costs lookups the moment it
+         is switched on. Opting in is the honest default for a mode that
+         goes and asks three other services about your books. */
+      shelfMode: 'data',
       set: (key, value) => set({ [key]: value } as Partial<Settings>),
       setPacer: (patch) =>
         set((s) => ({ pacer: { ...s.pacer, ...patch } })),

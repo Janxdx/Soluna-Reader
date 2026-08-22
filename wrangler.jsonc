@@ -174,6 +174,27 @@
 				"limit": 120,
 				"period": 60
 			}
+		},
+		{
+			// Catalogue lookups: /api/lookup. The one ceiling here that is
+			// not about protecting this Worker. A cache miss makes up to
+			// four outbound requests — Open Library, Google Books,
+			// Wikidata, Wikipedia — three of which are free services run
+			// on donations, and the polite thing is to make it impossible
+			// for a bug in the client to hammer them on our behalf.
+			//
+			// Sixty a minute against a client that paces itself at roughly
+			// one a second: enriching a shelf of sixty books for the first
+			// time takes a minute and then never happens again, because
+			// every answer is cached in D1 for good. A run that does hit
+			// the ceiling stops and picks up where it left off next time,
+			// which is why this can be tight without being felt.
+			"name": "RL_LOOKUP",
+			"namespace_id": "1008",
+			"simple": {
+				"limit": 60,
+				"period": 60
+			}
 		}
 	]
 	// Secrets are not listed here — they are set once, and never committed:

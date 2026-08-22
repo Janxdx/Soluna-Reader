@@ -68,9 +68,37 @@ function serviceWorkerAssets(): Plugin {
 }
 
 export default defineConfig({
+  /* The moment this bundle was built, shown on the account screen.
+
+     A PWA that never activates a new worker without being asked — which is
+     deliberate, see public/sw.js — can sit several builds behind while
+     every deploy looks successful from the outside. "Is this device
+     running the code I just shipped?" then has no answer, and a client-side
+     fix that has simply not arrived yet is indistinguishable from a fix
+     that does not work. That cost several rounds on the edition lookup. */
+  define: {
+    __BUILT_AT__: JSON.stringify(new Date().toISOString()),
+  },
   plugins: [react(), serviceWorkerAssets()],
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
-  server: { port: 5173 },
+  server: {
+    port: 5173,
+    /* `vite dev` serves the app and nothing else — there is no Worker
+       behind it, so without this it answers /api and /auth with the app's
+       own index.html and a 200. That is worse than a 404: the client sees
+       a successful response, tries to read JSON out of an HTML document,
+       and every failure downstream looks like "the catalogue had nothing".
+       It cost an evening on the edition lookup.
+
+       Pointing at wrangler's default port means `npm run dev` in one
+       terminal and `wrangler dev` in another behave like the deployed app.
+       With nothing listening the proxy fails loudly, which is the correct
+       answer to "the API is not running" and the one that was missing. */
+    proxy: {
+      '/api': { target: 'http://127.0.0.1:8787', changeOrigin: false },
+      '/auth': { target: 'http://127.0.0.1:8787', changeOrigin: false },
+    },
+  },
 });

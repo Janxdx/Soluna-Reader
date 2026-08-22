@@ -6,9 +6,9 @@
  * that opens on a grid of statistics is a screen you check once.
  */
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { MoodRibbon, Radar, ScoreCurve } from './Charts';
-import { SpineWall } from './SpineWall';
+import { SpineWall, type SpineExtras } from './SpineWall';
 import { TasteCard } from './TasteCard';
 import { RatingSheet } from './RatingSheet';
 import { Sheet } from './Sheet';
@@ -17,6 +17,12 @@ import { useDarkTheme } from './theme';
 import { useRatings, rateableBooks, type Rateable } from '../store/ratings';
 import { useLibrary } from '../store/library';
 import { useDevice } from '../store/device';
+import { useEditions, type EditionSubject } from '../store/editions';
+import { useOwnCovers } from '../store/ownCovers';
+import type { TroubleKind } from '../meta/editions';
+import { useSettings } from '../store/settings';
+import { editionKey, type EditionData } from '../engine/edition';
+import { knowsAnything } from '../engine/spine';
 import {
   MOODS,
   SORTS,
@@ -28,6 +34,30 @@ import {
   type SortKey,
 } from '../engine/rating';
 import { relativeDate } from '../engine/stats';
+
+/* Each of these is a different thing to go and do, which is the whole
+   reason they are not one "couldn't load covers". `no-endpoint` is the one
+   that bit in practice: `vite dev` has no Worker behind it and answers
+   /api/lookup with the app's own index.html, so the shelf is talking to
+   itself. `npm run worker` is the local setup that has an API. */
+const TROUBLE: Record<TroubleKind, string> = {
+  'signed-out': 'Sign in on the account tab to look covers up.',
+  'no-endpoint':
+    'No lookup service answered. On a dev server use `npm run worker`; on the live app, deploy again.',
+  offline: 'Offline — the shelf will fill in next time you have a connection.',
+  'rate-limited': 'Pausing for a minute, then carrying on where it left off.',
+  /* Never shown: a 'server' trouble always carries the Worker's own
+     sentence, which is more specific than anything that could be written
+     here. Present so the map stays exhaustive. */
+  server: 'The lookup service reported a problem.',
+};
+
+/** `EditionSubject` plus the library book it resolved to, purely so the
+    own-cover fallback below knows which `db.covers` row to read — the
+    catalogue lookup itself only ever sees the four fields it always saw. */
+interface RatingSubject extends EditionSubject {
+  bookId?: string;
+}
 
 export function Ratings() {
   const ratings = useRatings((s) => s.ratings);
@@ -47,6 +77,111 @@ export function Ratings() {
   const profile = useMemo(() => tasteProfile(ratings), [ratings]);
   const wall = useMemo(() => sortRatings(ratings, sort), [ratings, sort]);
   const candidates = useMemo(() => (picking ? rateableBooks() : []), [picking]);
+
+  /* ── the realistic shelf ──────────────────────────────────────────
+     Which mode the wall is in is a setting rather than local state: it is
+     a way of looking at your reading, not a filter, and having it reset
+     every time the tab is left would make it feel like a toy. */
+  const shelfMode = useSettings((s) => s.shelfMode);
+  const setSetting = useSettings((s) => s.set);
+  const byKey = useEditions((s) => s.byKey);
+  const filling = useEditions((s) => s.filling);
+  const trouble = useEditions((s) => s.trouble);
+  const fill = useEditions((s) => s.fill);
+  const refill = useEditions((s) => s.refill);
+
+  /* What each rating's book knows about itself, over and above the rating.
+     The publisher and the language come from the EPUB when there is one —
+     both beat the catalogue, because they describe the edition actually in
+     hand rather than a best match for its title. */
+  const subjects = useMemo((): Map<string, RatingSubject> => {
+    const lib = useLibrary.getState().books;
+    const dev = useDevice.getState().books;
+    const out = new Map<string, RatingSubject>();
+
+    for (const r of ratings) {
+      const book = r.bookId ? lib.find((b) => b.id === r.bookId) : undefined;
+      /* A device book may be linked to a library one, in which case the
+         EPUB is the better source even though the rating points at the
+         reader shelf. */
+      const device = r.deviceBookId ? dev.find((d) => d.id === r.deviceBookId) : undefined;
+      const linked = device?.bookId ? lib.find((b) => b.id === device.bookId) : undefined;
+      const resolved = book ?? linked;
+
+      out.set(r.id, {
+        /* The rating's own title and author, not the book's. They are what
+           the shelf shows and what a deleted book leaves behind, so the
+           lookup has to key off them or a book removed to save space would
+           quietly lose its cover. */
+        title: r.title,
+        author: r.author,
+        ...(resolved?.meta.language ? { lang: resolved.meta.language } : {}),
+        ...(resolved?.meta.publisher ? { publisher: resolved.meta.publisher } : {}),
+        ...(resolved ? { bookId: resolved.id } : {}),
+      });
+    }
+    return out;
+  }, [ratings]);
+
+  /* The own-cover fallback. `byId` from `useOwnCovers` so the wall re-renders
+     once an extraction lands. */
+  const ownCoverById = useOwnCovers((s) => s.byId);
+  const ensureOwnCover = useOwnCovers((s) => s.ensure);
+
+  /* Only for a book the catalogue has definitively said nothing about — a
+     row exists (the lookup ran) and `knowsAnything` is false — never for one
+     still waiting on a lookup, so this can't flash the own cover and then
+     the catalogue's a moment later. Reading `db.covers` and running the
+     palette extractor is local and instant, so unlike the catalogue fill
+     this doesn't need pacing; it is still gated on `shelfMode` so a book
+     never spends a canvas pass for a shelf nobody switched to. */
+  useEffect(() => {
+    if (shelfMode !== 'shelf') return;
+    for (const subject of subjects.values()) {
+      if (!subject.bookId) continue;
+      const row = byKey[editionKey(subject.title, subject.author)];
+      if (row && !knowsAnything(row.data) && !(subject.bookId in ownCoverById)) {
+        void ensureOwnCover(subject.bookId);
+      }
+    }
+  }, [shelfMode, subjects, byKey, ownCoverById, ensureOwnCover]);
+
+  const extras = useMemo((): Record<string, SpineExtras> => {
+    const out: Record<string, SpineExtras> = {};
+    for (const [id, subject] of subjects) {
+      const key = editionKey(subject.title, subject.author);
+      const row = byKey[key];
+      const ownArt = subject.bookId ? ownCoverById[subject.bookId] : undefined;
+      /* The book's own cover stands in only on a definitive miss — see the
+         effect above — and only when something of it actually survived
+         extraction. */
+      const fallback: EditionData | undefined =
+        row && !knowsAnything(row.data) && (ownArt?.palette?.length || ownArt?.texture)
+          ? {
+              key,
+              ...(ownArt.palette?.length ? { palette: ownArt.palette } : {}),
+              ...(ownArt.texture ? { edgeTexture: ownArt.texture } : {}),
+            }
+          : undefined;
+      const edition = fallback ?? row?.data;
+      out[id] = {
+        ...(edition ? { edition } : {}),
+        ...(subject.publisher ? { publisher: subject.publisher } : {}),
+        ...(subject.lang ? { language: subject.lang } : {}),
+      };
+    }
+    return out;
+  }, [subjects, byKey, ownCoverById]);
+
+  /* Only fetched once the realistic shelf has actually been asked for.
+     Looking every book up on the chance that somebody might switch would
+     be a few dozen requests to three other people's services for a screen
+     nobody opened — and the run is paced at one a second, so it is not
+     free even when it is idle. */
+  useEffect(() => {
+    if (shelfMode !== 'shelf' || !ratings.length) return;
+    void fill([...subjects.values()]);
+  }, [shelfMode, subjects, ratings.length, fill]);
 
   const closeSheets = () => {
     setEditing(null);
@@ -85,21 +220,74 @@ export function Ratings() {
           <>
             <p className="taste-line">{profile.tagline}</p>
 
-            <div className="segment" style={{ marginBottom: 20 }}>
-              {SORTS.map((s) => (
+            <div className="shelf-controls">
+              <div className="segment">
+                {SORTS.map((s) => (
+                  <button
+                    key={s.key}
+                    className={sort === s.key ? 'on' : ''}
+                    onClick={() => setSort(s.key)}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Two readings of the same shelf, not a display preference.
+                  See the note at the top of engine/spine.ts: the realistic
+                  one gives height and colour back to the object and hands
+                  the score down to the stamp at the foot. */}
+              <div className="segment">
                 <button
-                  key={s.key}
-                  className={sort === s.key ? 'on' : ''}
-                  onClick={() => setSort(s.key)}
+                  className={shelfMode === 'data' ? 'on' : ''}
+                  onClick={() => setSetting('shelfMode', 'data')}
+                  title="Colour is the mood, height is the score"
                 >
-                  {s.label}
+                  Data
                 </button>
-              ))}
+                <button
+                  className={shelfMode === 'shelf' ? 'on' : ''}
+                  onClick={() => setSetting('shelfMode', 'shelf')}
+                  title="The books as they actually look"
+                >
+                  Shelf
+                </button>
+              </div>
+
+              {/* Throwing the local cache away is safe here in a way it is
+                  nowhere else in this app: the table holds no user data,
+                  and the server has every answer already, so this costs a
+                  round trip to our own Worker and nothing to any
+                  catalogue. It is the answer to a wrong cover, and to a
+                  fix that shipped and did not seem to arrive. */}
+              {shelfMode === 'shelf' && !filling && (
+                <button
+                  className="linky muted"
+                  onClick={() => void refill([...subjects.values()])}
+                  title="Discard what is stored and ask the catalogues again"
+                >
+                  Look up again
+                </button>
+              )}
             </div>
+
+            {shelfMode === 'shelf' && (filling || trouble) && (
+              <p className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
+                {/* The realistic shelf degrades to the ordinary one when a
+                    lookup fails, which is right — and which also makes
+                    every possible failure look identical from here: you
+                    press Shelf and nothing happens. So say which one. */}
+                {trouble
+                  ? (trouble.detail ?? TROUBLE[trouble.kind])
+                  : 'Finding covers — the shelf fills in as they arrive.'}
+              </p>
+            )}
 
             <SpineWall
               ratings={wall}
               dark={dark}
+              mode={shelfMode}
+              extras={extras}
               activeId={editing?.id}
               onOpen={(r) => setEditing(r)}
             />

@@ -16,6 +16,7 @@
 import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { Sheet } from './Sheet';
 import { Radar } from './Charts';
+import { EditionCard } from './EditionCard';
 import { IconStar, IconTrash } from './Icons';
 import {
   AXES,
@@ -85,6 +86,21 @@ export function RatingSheet({ open, subject, existing, dark, onClose }: Props) {
   const deviceBookId = existing?.deviceBookId ?? subject?.deviceBookId;
   const progress = useMemo(() => statsFor(bookId, deviceBookId), [bookId, deviceBookId]);
 
+  /* The EPUB's own publisher and language, where there is an EPUB. Both
+     beat what a catalogue guesses from a title: they describe the edition
+     actually in hand. A device book linked to a library one counts as
+     having an EPUB, which is the point of the link. */
+  const edition = useMemo(() => {
+    const lib = useLibrary.getState().books;
+    const book = bookId ? lib.find((b) => b.id === bookId) : undefined;
+    const device = deviceBookId
+      ? useDevice.getState().books.find((d) => d.id === deviceBookId)
+      : undefined;
+    const linked = device?.bookId ? lib.find((b) => b.id === device.bookId) : undefined;
+    const meta = (book ?? linked)?.meta;
+    return { language: meta?.language, publisher: meta?.publisher };
+  }, [bookId, deviceBookId]);
+
   const patch = (p: Partial<Draft>) => setDraft((d) => ({ ...d, ...p }));
 
   const setAxis = (key: AxisKey, value: number) =>
@@ -137,6 +153,16 @@ export function RatingSheet({ open, subject, existing, dark, onClose }: Props) {
             </p>
           )}
         </header>
+
+        {/* The other half of the page: what the world knows about this
+            book, next to what you thought of it. Renders nothing at all
+            when the lookup found nothing. */}
+        <EditionCard
+          title={title}
+          author={author}
+          {...(edition.language ? { language: edition.language } : {})}
+          {...(edition.publisher ? { publisher: edition.publisher } : {})}
+        />
 
         <BookProgress stats={progress} />
 

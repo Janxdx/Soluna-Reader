@@ -293,6 +293,37 @@ create table if not exists ratings (
 create index if not exists ratings_seq_idx on ratings (user_id, row_seq);
 create index if not exists ratings_book_idx on ratings (user_id, book_id);
 
+-- ── edition cache ──────────────────────────────────────────────────
+--
+--  What a book looks like in the world: publisher, page count, cover, and
+--  the opening of its Wikipedia article. Filled by worker/editions.ts from
+--  Open Library, Google Books and Wikidata.
+--
+--  The only table here with no `user_id`, which is worth saying out loud
+--  given the note at the top of this file. It is sound because nothing in
+--  it came from a reader — every row is a copy of a public catalogue
+--  record, keyed by a title and an author that any two people might both
+--  own, and two readers of the same novel *should* share the row. What
+--  would be private is who looked up what, and that is not recorded: there
+--  is no column for it. The endpoint still requires a session, because
+--  making outbound requests on an anonymous caller's behalf is how you
+--  become somebody else's rate limit problem.
+--
+--  `payload` is the whole answer as json rather than a column per field.
+--  It is a cache of somebody else's schema, so a shape that can absorb a
+--  new field without a migration is the right trade here — the opposite
+--  of the reading tables above, which are ours and are queried by column.
+create table if not exists edition_cache (
+  -- `editionKey(title, author)` from src/engine/edition.ts — normalised
+  -- hard so the same book from two shelves lands on one row
+  key        text primary key,
+  payload    text    not null default '{}',
+  -- a hit is kept for good (a novel's page count does not change); a miss
+  -- is retried after a fortnight, since a book absent from a catalogue
+  -- today may be in it next month
+  fetched_at integer not null default 0
+);
+
 -- ── settings ───────────────────────────────────────────────────────
 create table if not exists settings (
   user_id    text    primary key references users(id) on delete cascade,

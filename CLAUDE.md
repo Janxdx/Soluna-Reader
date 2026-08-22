@@ -26,6 +26,185 @@ Sections that are now history rather than pending work:
 - **Supabase removed; D1 schema now deploys itself** (below).
 - **renamed from Lumen to Soluna** (below).
 
+## How much longer, and how much today
+
+Two small additions, both to numbers that already existed somewhere and
+could not be read where they were wanted.
+
+**The chapter countdown is now on screen while you read it.** The bottom
+chrome has carried "12m to next chapter" since the pace estimate landed,
+and the chrome is hidden for the whole of the act it describes — you hide
+it in order to read — so the number was only ever available to someone who
+had stopped. `.chapter-left` in `Reader.tsx` is the same two values
+(`chapterLeft`, `lastChapter`) drawn as a pill in the outer corner, where a
+printed book keeps its folio. It stands down when the chrome comes up
+rather than saying the same thing twice a few pixels apart, and it is
+`pointer-events: none` because it overlaps the right tap zone — a countdown
+that swallowed page turns would be a bad trade for a number.
+
+**`dayTotal()` in `stats.ts`** is today's reading, and it is built on
+`byDay` rather than filtering by timestamp so that a day means what it
+means everywhere else in the app: local midnight to local midnight, the
+session credited to the day it *started* on. That last part is the whole
+reason it is worth a test — an evening that runs past midnight is one
+evening, and splitting it would make the Today card disagree with both the
+streak and the last bar of the chart.
+
+**The daily bars answer for one day at a time.** Printing thirty numbers
+under the chart would destroy the shape that is the point of drawing it,
+so the number is on demand: hover with a pointer, hold with a finger.
+Three things worth not re-deriving:
+
+- **The hit target is one transparent strip over the SVG, not the `rect`s.**
+  A day with no reading is a zero-height bar and a quiet day is barely
+  more, so hit-testing the drawing makes exactly the days you most want to
+  interrogate the ones you cannot hit.
+- **The day is resolved from `clientX` against the strip's own rect**, not
+  from a per-cell `onPointerEnter`. Touch takes implicit pointer capture on
+  the element where the press began, so per-cell handlers fire once and a
+  finger dragged along the month reads back the day it started on for the
+  whole gesture.
+- **`touch-action: pan-y` on the strip** is what keeps the page scrollable
+  through the chart. A vertical drag scrolls, and the browser says so by
+  cancelling the pointer, which is what clears the readout.
+
+No schema change and nothing persisted, so `npm run db:local` is not needed.
+
+## What a book looks like in the world (covers, spines, Wikipedia)
+
+The shelf now draws two ways, and the toggle in the ratings tab is a real
+choice rather than a display option. **Data** is what it always was —
+colour is the mood, height is the score, thickness is the length.
+**Shelf** gives height and colour back to the object: the cover's own
+palette, the paper's own thickness, the series' own livery. Those cannot
+both be true at once. A Reclam is short because it is a Reclam, not
+because you disliked it, so in the realistic mode the score drops to the
+number stamped at the foot, which you have to walk up and read. The
+reasoning is at the top of `src/engine/spine.ts`; don't re-litigate it
+without reading that.
+
+**Real spine images do not exist as data.** No catalogue holds a
+photograph of the side of a book — Open Library, Google Books and everyone
+else hold the front cover and nothing else. What is available is the
+publisher and the series, and a series exists precisely so that every book
+in it looks the same. Hence `LIVERIES` in `src/engine/edition.ts`: twelve
+hand-written liveries (Reclam yellow, the Penguin tri-band, edition
+suhrkamp, rororo, dtv, Fischer, Hanser, Oxford, Vintage, Manesse) drawn in
+CSS at any thickness. Anything without a livery falls back to the cover's
+own colours.
+
+Six things worth not re-deriving:
+
+- **The lookup is on the server because it cannot be anywhere else.**
+  Google Books sends no CORS headers; Open Library wants a descriptive
+  `User-Agent`, which is a forbidden header name in `fetch`; a Google key
+  must not ship to a client; and the answer is identical for every reader
+  alive. `worker/editions.ts` does all four catalogue calls.
+- **The cover is proxied through R2 for the canvas, not for the network.**
+  `getImageData` on a canvas that has drawn a cross-origin image throws,
+  and reading those pixels is where the palette comes from — so the cover
+  has to arrive same-origin. Served from `/api/editions/cover/<slug>`.
+- **`edition_cache` has no `user_id`,** the only table in the schema that
+  doesn't. Sound because nothing in it came from a reader: it is a copy of
+  a public catalogue record, and two readers of the same novel *should*
+  share the row. What would be private is who looked up what, and there is
+  no column for it. Covers likewise live under a shared `editions/` prefix
+  in R2, away from the per-user objects.
+- **Dexie v6 `editions` is outside sync and outside tombstones,** like
+  `passages` — but for a different reason. A passage index is cheap to
+  rebuild; an edition is cheap *to the user*, because the server already
+  cached it, so a second iPad gets it from D1 without troubling any
+  catalogue. Syncing rows would move the same bytes through more
+  machinery for the same result.
+- **The matcher lives in `src/engine/edition.ts` and the Worker imports
+  it.** It was duplicated first and that was wrong: two copies typecheck
+  independently, the tests only exercise one, and the symptom is a cover
+  that is right on the shelf and wrong in the sheet. The file is pure
+  TypeScript with no imports so that it can be shared across the two
+  tsconfigs.
+- **A lookup that finds nothing still writes a row,** so the app stops
+  asking — and `knowsAnything()` in `spine.ts` is what stops the shelf
+  drawing that row as a real book. Without it every book the catalogues
+  missed comes out the same default height in the same colour.
+
+`tests/edition.test.mts` is the layer no build can have an opinion about:
+a matcher that confidently returns the wrong book typechecks perfectly.
+It caught four real bugs on first run — `ß` deleted rather than folded to
+`ss` (so "Der Prozeß" and "Der Prozess" were two books), a subtitle rule
+that ran after normalisation had already eaten the colon, and a pure-recall
+overlap score that rated *Lektürehilfen Franz Kafka Der Prozess* a perfect
+match for the novel. The third is why `wordOverlap` mixes in a quarter of
+the precision.
+
+`RL_LOOKUP` (namespace 1008, 60/min) is the first ceiling here that
+protects somebody else's service rather than ours. The client paces itself
+at one lookup a second and stops on a 429, picking up where it left off.
+
+**The Wikipedia lookup does not go through Wikidata**, though the first cut
+did and the reasoning was good — being a book is a P31 statement, and
+sitelinks name the same work's article in every language. It failed for a
+dull reason: `wbsearchentities` is a *prefix* search over labels, and the
+German article for Der Prozess is titled "Der Process", so the query
+diverged at the eighth character and matched nothing. German orthography
+reformed in 1996; half the canon has two spellings. It now searches the
+language Wikipedia's full-text index and verifies the hit instead — the
+author must be named in the opening, and the Wikidata one-line description
+decides between the novel and the 1962 Orson Welles film, which also names
+Kafka in its first sentence.
+
+**`/api/lookup` is a POST although it reads.** It shipped as a GET and that
+was wrong: GETs are exempt from `requireSameOrigin` because they are
+assumed to change nothing, and the session cookie is `SameSite=Lax`, which
+is withheld from a cross-site image or fetch but *sent* on a top-level
+navigation. A link somebody clicked would therefore have spent their lookup
+budget — and Open Library's — on a search of the attacker's choosing.
+Nothing private was exposed either way, since the answer is a public
+catalogue record, but a request with four outbound side effects is not a
+GET. As a POST it is same-origin only and unreachable by link.
+
+**Schema change:** `npm run db:local` is needed for local dev. Remote is
+automatic via `predeploy` — **but only when you deploy with `npm run
+deploy`.** `npx wrangler deploy` skips npm's pre-hook and ships the Worker
+against a database that has never seen `edition_cache`. That is now the
+second time a table has gone missing in prod this way (`ratings` was the
+first), so the lookup no longer depends on the cache existing: `readCache`
+and `writeCache` catch "no such table", warn with the command that fixes
+it, and carry on uncached. `GOOGLE_BOOKS_KEY` is an optional secret —
+unkeyed requests work; set it if lookups start coming back empty.
+
+**The palette's white test is on the lowest channel, not the highest.**
+White is every channel high; a saturated red is (250, 40, 40) and its
+highest channel is as high as white's. Testing the maximum discarded
+exactly the vivid covers the feature exists for — and silently, because an
+empty palette is indistinguishable from a failed lookup, so the spine came
+out mood-grey as though nothing had been found. `isPaperOrInk` is exported
+purely so `tests/edition.test.mts` can pin it. There is a second pass that
+takes every pixel when the first finds nothing, so an all-cream literary
+paperback comes back cream rather than empty.
+
+`EXTRACT_VERSION` in `src/meta/editions.ts` is how a fix like that reaches
+rows already cached: bump it and older rows are treated as absent. Cheap
+because the server's cache is untouched, so a re-fetch costs one call to
+our own Worker and nothing to anybody else's service.
+
+**No `langRestrict` on the Google query.** It is a hard filter and the
+language it would be given is often a guess — a book logged by hand has no
+EPUB to declare one, so the client falls back to `navigator.language`, and
+an English novel on a German iPad was being searched for among German
+editions only. The preference survives as the small bonus in `score`.
+
+**The shelf tells you why it is empty.** Failing soft is right — a book
+without a cover still draws — but the first cut failed soft *and* silently,
+so signed out, no endpoint, offline, rate-limited and a 500 all looked
+identical: press Shelf, nothing happens. `LookupTrouble` in
+`src/meta/editions.ts` keeps the reason and the tab prints it, and a 5xx
+passes the Worker's own sentence through rather than replacing it with
+something vaguer. Two traps found doing this: `vite dev` answers `/api`
+with the app's own `index.html` and a **200** (hence the content-type check
+before the body is trusted, and the new dev proxy to wrangler's port), and
+a run now stops after three consecutive failures instead of spending a
+minute on requests that cannot work.
+
 ## The PWA update path
 
 The offline shell used to call `skipWaiting()` in `install` and delete every

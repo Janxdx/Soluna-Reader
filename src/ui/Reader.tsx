@@ -671,6 +671,25 @@ export function Reader({ bookId, onClose }: { bookId: string; onClose: () => voi
         <div className="tapzone l" />
         <div className="tapzone r" />
 
+        {/* How much of this chapter is left, while you are reading it.
+            The bottom chrome has carried this number all along, but the
+            chrome is hidden for the whole of the act it describes — you
+            hide it precisely in order to read — so the answer was only
+            ever available to someone who had stopped. It sits in the
+            outer corner, where a printed book keeps its folio, and stands
+            down when the chrome comes up rather than saying the same
+            thing twice a few pixels apart.
+
+            `pointer-events: none` matters: it overlaps the right tap
+            zone, and a countdown that swallowed page turns would be a bad
+            trade for a number. */}
+        {ready && !unavailable && (
+          <div className={`chapter-left${chrome ? ' hidden' : ''}`} aria-hidden={chrome}>
+            <b className="num">{chapterLeft}</b>
+            <span>{lastChapter ? 'to the end' : 'left in chapter'}</span>
+          </div>
+        )}
+
         <div className={`chrome top${chrome ? '' : ' hidden'}`}>
           <button className="icon-btn" onClick={onClose} aria-label="Back to library">
             <IconBack />

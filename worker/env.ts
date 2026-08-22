@@ -32,6 +32,10 @@ export interface Env {
   RL_FILES_READ?: RateLimit;
   /** EPUB and cover uploads and deletes, the direction that costs storage */
   RL_FILES_WRITE?: RateLimit;
+  /** catalogue lookups — the only endpoint that spends *somebody else's*
+      quota, so it is the one where a loop in the client is a problem for
+      a third party rather than for us */
+  RL_LOOKUP?: RateLimit;
 
   /* ── vars ──────────────────────────────────────────────────────── */
 
@@ -44,6 +48,10 @@ export interface Env {
 
   /** Resend API key. Absent in local dev, where links are logged instead. */
   RESEND_API_KEY?: string;
+  /** Google Books key. Optional — unkeyed requests work and are rationed by
+      address, which is enough for one reader's shelf. Set it if lookups
+      start coming back empty:  npx wrangler secret put GOOGLE_BOOKS_KEY */
+  GOOGLE_BOOKS_KEY?: string;
 }
 
 /* ── WebAuthn identity ─────────────────────────────────────────────

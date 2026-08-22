@@ -26,6 +26,7 @@ import {
   requireUser,
 } from './auth';
 import { pull, push, type Changes } from './data';
+import { editionCover, lookupEdition } from './editions';
 import { SESSION_TTL, type Env } from './env';
 import { gate } from './limit';
 import {
@@ -186,6 +187,58 @@ async function route(req: Request, env: Env, url: URL, path: string): Promise<Re
     const user = await requireUser(env, req);
     const changes = await readJson<Partial<Changes>>(req);
     return json({ cursor: await push(env, user, changes) });
+  }
+
+  /* ── editions ────────────────────────────────────────────────────
+     What a book looks like in the world, as opposed to what this reader
+     thought of it. Requires a session like everything else under /api,
+     though what comes back is public: making outbound requests to three
+     other people's services on behalf of an anonymous caller is how you
+     become their rate limit problem. See worker/editions.ts. */
+
+  /* A POST, though it reads rather than writes, and the reason is the
+     side effects rather than the answer. A cache miss here makes up to
+     four outbound requests to other people's services and puts an object
+     in R2 — so this is not the safe, repeatable GET that HTTP promises,
+     and it should not be reachable by following a link.
+
+     As a GET it was: GETs are exempt from the same-origin check (they
+     change nothing, by assumption), and the session cookie is SameSite=Lax,
+     which is *not* sent for a cross-site image or fetch but *is* sent for a
+     top-level navigation. So a link somebody clicked would have spent their
+     lookup budget on a search of the attacker's choosing. Nothing private
+     leaks — the answer is a public catalogue record either way — but it is
+     free use of our quota and of Open Library's, and there is no reason to
+     allow it. As a POST it passes `requireSameOrigin` above and a link
+     cannot reach it at all. */
+  if (post('/api/lookup')) {
+    await requireUser(env, req);
+    const body = await readJson<{
+      key?: string;
+      slug?: string;
+      title?: string;
+      author?: string;
+      lang?: string;
+    }>(req);
+    return json(
+      await lookupEdition(env, {
+        key: body.key ?? '',
+        slug: body.slug ?? '',
+        title: body.title ?? '',
+        author: body.author ?? '',
+        lang: body.lang ?? 'en',
+      })
+    );
+  }
+
+  /* Served from our own origin rather than linked to the catalogue's,
+     because a cross-origin image taints a canvas and a tainted canvas
+     cannot be read — and reading the pixels is how the shelf gets a book's
+     real colours. Same-origin is the feature, not the hosting. */
+  const editionMatch = /^\/api\/editions\/cover\/([a-z0-9-]+)$/.exec(path);
+  if (editionMatch && req.method === 'GET') {
+    await requireUser(env, req);
+    return editionCover(env, editionMatch[1]);
   }
 
   /* ── files ───────────────────────────────────────────────────── */

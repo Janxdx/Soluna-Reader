@@ -407,8 +407,31 @@ function SignedIn({ onImpressum }: { onImpressum: () => void }) {
         <button className="linky muted" onClick={onImpressum} style={{ marginTop: 'var(--s4)' }}>
           Impressum
         </button>
+
+        <BuildStamp />
       </div>
     </div>
+  );
+}
+
+/* When this copy of the app was built.
+ *
+ * The offline shell never activates a new build without being asked — that
+ * is deliberate, so that a worker cannot seize a page whose lazy chunks it
+ * has just deleted. The cost is that a device can sit several builds behind
+ * while every deploy looks perfectly successful from the outside, and a
+ * client-side fix that has simply not arrived is indistinguishable from one
+ * that does not work. This is the line that tells the two apart. */
+function BuildStamp() {
+  const built = new Date(__BUILT_AT__);
+  const stamp = Number.isNaN(built.getTime())
+    ? __BUILT_AT__
+    : built.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+
+  return (
+    <p className="muted" style={{ fontSize: 11, marginTop: 'var(--s4)', opacity: 0.7 }}>
+      Build {stamp}
+    </p>
   );
 }
 

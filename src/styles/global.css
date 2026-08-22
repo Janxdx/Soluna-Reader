@@ -594,6 +594,43 @@ body::after {
   right: 0;
 }
 
+/* The chapter countdown that stays put while the chrome is away.
+   Sized and coloured to be readable at a glance and ignorable otherwise —
+   it is on screen for hours at a time. */
+.chapter-left {
+  position: absolute;
+  z-index: 30;
+  right: calc(var(--safe-r) + var(--s4));
+  bottom: calc(var(--safe-b) + var(--s3));
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: var(--r-full);
+  background: var(--glass);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--ink-3);
+  /* it overlaps the right tap zone; the page turn must win */
+  pointer-events: none;
+  transition: opacity var(--t-chrome) var(--ease-out),
+    transform var(--t-chrome) var(--ease-out);
+}
+.chapter-left b {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  font-size: 12.5px;
+  font-weight: 620;
+  color: var(--ink-2);
+}
+/* the bottom chrome says the same thing when it is up */
+.chapter-left.hidden {
+  opacity: 0;
+  transform: translateY(6px);
+}
+
 /* reader chrome */
 .chrome {
   position: absolute;
@@ -1081,6 +1118,58 @@ input[type='range']::-moz-range-thumb {
   overflow: visible;
 }
 
+/* Daily bars, with the held day's number floating above them.
+   The row reserves the readout's height so that showing one never moves
+   the chart underneath it. */
+.daybars {
+  position: relative;
+  padding-top: 30px;
+  margin-top: -12px;
+}
+.daybars .hits {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 76px;
+  /* a vertical drag still scrolls the page; the browser cancels the
+     pointer when it takes over, which clears the readout */
+  touch-action: pan-y;
+  cursor: crosshair;
+}
+.daybars .tip {
+  position: absolute;
+  top: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+  padding: 4px 10px;
+  border-radius: var(--r-full);
+  background: var(--ink);
+  color: var(--bg);
+  box-shadow: var(--shadow-1);
+  font-size: 11px;
+  pointer-events: none;
+  animation: tipin 140ms var(--ease-out);
+}
+.daybars .tip b {
+  font-family: var(--font-num);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 640;
+}
+.daybars .tip span {
+  opacity: 0.62;
+}
+/* opacity only — the element's transform is its horizontal placement, and
+   animating it here would fight the inline value and snap on entry */
+@keyframes tipin {
+  from {
+    opacity: 0;
+  }
+}
+
 /* toast */
 .toast {
   cursor: pointer;
@@ -1558,6 +1647,18 @@ input[type='range']::-moz-range-thumb {
    here the colour *is* the data, and the restraint elsewhere is what
    makes eight cloth colours land as meaning rather than as decoration. */
 
+/* Sort on the left, the two readings of the shelf on the right. They wrap
+   onto separate lines on a phone rather than shrinking, because a segmented
+   control with four squeezed labels is worse than two lines. */
+.shelf-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin-bottom: 20px;
+}
+
 .wall {
   --slot-h: 250px;
   --row-gap: 48px;
@@ -1601,6 +1702,15 @@ input[type='range']::-moz-range-thumb {
   align-items: flex-end;
   flex: none;
   animation: shelve 620ms var(--ease-out) both;
+  /* Switching between the two readings of the shelf moves the same books
+     rather than rebuilding the wall, so the change is legible: you can
+     watch the Reclam drop to its real height. */
+  transition: width 520ms var(--ease-spring);
+}
+@media (prefers-reduced-motion: reduce) {
+  .slot {
+    transition: none;
+  }
 }
 @keyframes shelve {
   from {
@@ -1623,7 +1733,14 @@ input[type='range']::-moz-range-thumb {
     0 2px 5px rgba(20, 14, 8, 0.22);
   transition:
     transform 380ms var(--ease-spring),
-    box-shadow 380ms var(--ease-spring);
+    box-shadow 380ms var(--ease-spring),
+    height 520ms var(--ease-spring),
+    background 520ms var(--ease-out);
+}
+@media (prefers-reduced-motion: reduce) {
+  .spine {
+    transition: none;
+  }
 }
 .spine:hover,
 .spine:focus-visible,
@@ -1656,6 +1773,97 @@ input[type='range']::-moz-range-thumb {
   bottom: 34px;
 }
 
+/* ── liveries ──────────────────────────────────────────────────────
+   Real spines are not available as data — nobody's catalogue holds a
+   photograph of the side of a book. What is available is the publisher and
+   the series, and a series exists precisely so that every book in it looks
+   the same. So these draw the handful of decisions that make a publisher's
+   shelf presence, in CSS, at any thickness: see LIVERIES in
+   engine/edition.ts for which publisher gets which.
+
+   `--accent` is set per spine from the livery (or from the cover's second
+   colour when the publisher isn't one we can draw). */
+
+/* Narrow rules at head and foot — edition suhrkamp, Reclam, Vintage. */
+.spine.p-rules::before,
+.spine.p-rules::after {
+  content: '';
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  height: 1.5px;
+  background: var(--accent);
+  opacity: 0.8;
+}
+.spine.p-rules::before {
+  top: 17px;
+}
+.spine.p-rules::after {
+  bottom: 20px;
+}
+
+/* A printed panel inset into the ground, which is how most paperbacks
+   carry their title — rororo, dtv, Fischer, Penguin Classics, Oxford. */
+.spine.p-panel::before {
+  content: '';
+  position: absolute;
+  inset: 24px 3px 30px;
+  border: 1px solid var(--accent);
+  opacity: 0.55;
+  border-radius: 1px;
+}
+
+/* Penguin's horizontal thirds: colour, white, colour. The one spine
+   anybody can identify from across a room, and the reason it works is
+   that the bands are the same width every time. */
+.spine.p-triband::before,
+.spine.p-triband::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 26%;
+  background: var(--accent);
+}
+.spine.p-triband::before {
+  top: 22%;
+}
+.spine.p-triband::after {
+  bottom: 22%;
+}
+
+/* The publisher's mark, at the foot where it sits on the real thing.
+   Horizontal rather than along the spine, because that is also where it
+   sits on the real thing — the one piece of type on a book's edge that
+   is set the same way in every country. */
+.spine .imprint {
+  flex: none;
+  font-size: 6.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.72;
+  margin-bottom: 4px;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* The realistic shelf is printed, not bound in cloth: less inset shadow,
+   a harder edge, and a paper-white top where the block shows. */
+.spine.real {
+  border-radius: 1px 2px 2px 1px;
+  box-shadow:
+    inset -2px 0 5px rgba(0, 0, 0, 0.18),
+    inset 1px 0 0 rgba(255, 255, 255, 0.2),
+    0 2px 5px rgba(20, 14, 8, 0.24);
+}
+/* The bands are stitching on a bound book and have no business on a
+   glued paperback. */
+.spine.real .band {
+  display: none;
+}
+
 .spine .title {
   writing-mode: vertical-rl;
   text-orientation: mixed;
@@ -1675,6 +1883,17 @@ input[type='range']::-moz-range-thumb {
   .spine .title {
     font-size: 11.5px;
   }
+}
+
+/* Which way the title runs is a matter of nationality, not taste: German
+   and French spines read downwards, so the title is upright when the book
+   lies face-up on a table; English and American ones read upwards, so it is
+   upright on the shelf. Both are ubiquitous at home and both look wrong
+   applied abroad, which is why getting it right reads as real before you
+   have worked out why. `vertical-rl` gives us downwards; the rotation is
+   how you get the other one, since `sideways-lr` is still not in Safari. */
+.spine .title.up {
+  transform: rotate(180deg);
 }
 
 .spine .score {
@@ -1697,6 +1916,77 @@ input[type='range']::-moz-range-thumb {
   border-radius: var(--r-full);
   background: currentColor;
   box-shadow: 0 0 0 2.5px rgba(255, 255, 255, 0.14);
+}
+
+/* ── what the world knows about a book ─────────────────────────────
+   The cover, the printing and the opening of the Wikipedia article, under
+   the title in the rating sheet. Deliberately quiet: it sits next to the
+   part of the page that is entirely the reader's own opinion, and it must
+   not compete with it. */
+
+.edition-card {
+  display: flex;
+  gap: var(--s4);
+  align-items: flex-start;
+  margin: var(--s4) 0 var(--s5);
+  padding: var(--s4) 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+@media (max-width: 520px) {
+  .edition-card {
+    gap: var(--s3);
+  }
+}
+
+.edition-cover {
+  flex: none;
+  width: 74px;
+  border-radius: 2px;
+  /* Covers arrive at whatever aspect the catalogue scanned them at, from
+     a square audiobook tile to a tall trade paperback. A fixed width and
+     a free height keeps a row of them tidy without cropping anybody's
+     typography off. */
+  height: auto;
+  box-shadow:
+    0 1px 2px rgba(20, 14, 8, 0.2),
+    0 6px 16px rgba(20, 14, 8, 0.18);
+}
+
+.edition-body {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.edition-facts {
+  font-size: 12px;
+  color: var(--ink-2);
+  letter-spacing: 0.01em;
+}
+
+.edition-livery {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  margin-top: 3px;
+}
+
+.edition-extract {
+  font-family: var(--font-read);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  margin-top: 8px;
+}
+
+.edition-source {
+  font-size: 11px;
+  color: var(--ink-3);
+  margin-top: 7px;
+}
+.edition-source a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 /* the generated sentence about the reader — set like a pull quote,

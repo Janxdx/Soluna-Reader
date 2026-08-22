@@ -100,12 +100,26 @@ async function check(binding: RateLimit | undefined, name: string, key: string):
 /* Which ceiling applies to what. Everything under /api and /auth passes the
    address wall; most also pass the burst wall; the last depends on what the
    endpoint would go on to do. */
-type Cost = 'read' | 'write' | 'auth' | 'fileRead' | 'fileWrite';
+type Cost = 'read' | 'write' | 'auth' | 'fileRead' | 'fileWrite' | 'lookup';
 
 function costOf(method: string, path: string): Cost | null {
   if (path.startsWith('/api/files/')) {
     return method === 'GET' ? 'fileRead' : 'fileWrite';
   }
+
+  /* Catalogue lookups. The odd one out: everything else here rations our
+     own database, and this rations Open Library's, Google's and
+     Wikipedia's. A cache miss makes four outbound requests to services that
+     are free and run on donations, so the ceiling is not about protecting
+     this Worker — it is about not being the reason somebody else's service
+     starts refusing us. Tight, because a whole shelf is a few dozen
+     lookups once and nothing after that. */
+  /* Method-independent on purpose: it is a POST, and it must stay counted
+     as a lookup rather than falling through to the generic write ceiling
+     below, which is sized for /api/push. */
+  if (path === '/api/lookup') return 'lookup';
+  /* Serving a stored cover is an R2 read like any other. */
+  if (path.startsWith('/api/editions/')) return 'fileRead';
 
   /* The whole signed-out surface, including the two endpoints that are
      cheapest to call and most expensive to serve: /auth/request sweeps
@@ -155,6 +169,7 @@ export async function gate(env: Env, req: Request, path: string): Promise<void> 
 
   if (!cost) return;
 
+  if (cost === 'lookup') return check(env.RL_LOOKUP, 'RL_LOOKUP', actor);
   if (cost === 'fileRead') return check(env.RL_FILES_READ, 'RL_FILES_READ', actor);
   if (cost === 'fileWrite') return check(env.RL_FILES_WRITE, 'RL_FILES_WRITE', actor);
   if (cost === 'write') return check(env.RL_WRITE, 'RL_WRITE', actor);
