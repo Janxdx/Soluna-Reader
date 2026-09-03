@@ -78,11 +78,12 @@ export function Ratings() {
   const wall = useMemo(() => sortRatings(ratings, sort), [ratings, sort]);
   const candidates = useMemo(() => (picking ? rateableBooks() : []), [picking]);
 
-  /* ── the realistic shelf ──────────────────────────────────────────
-     Which mode the wall is in is a setting rather than local state: it is
-     a way of looking at your reading, not a filter, and having it reset
-     every time the tab is left would make it feel like a toy. */
-  const shelfMode = useSettings((s) => s.shelfMode);
+  /* ── covers, from the outside ────────────────────────────────────
+     Whether the shelf may ask outside catalogues for a cover is a setting
+     rather than local state, for the same reason it always was: consent,
+     not a filter, and resetting it on every visit would make it feel like
+     a toy. See store/settings.ts. */
+  const lookupCoversOnline = useSettings((s) => s.lookupCoversOnline);
   const setSetting = useSettings((s) => s.set);
   const byKey = useEditions((s) => s.byKey);
   const filling = useEditions((s) => s.filling);
@@ -133,10 +134,10 @@ export function Ratings() {
      still waiting on a lookup, so this can't flash the own cover and then
      the catalogue's a moment later. Reading `db.covers` and running the
      palette extractor is local and instant, so unlike the catalogue fill
-     this doesn't need pacing; it is still gated on `shelfMode` so a book
-     never spends a canvas pass for a shelf nobody switched to. */
+     this doesn't need pacing; it is still gated on `lookupCoversOnline` so a
+     book never spends a canvas pass when the setting is off. */
   useEffect(() => {
-    if (shelfMode !== 'shelf') return;
+    if (!lookupCoversOnline) return;
     for (const subject of subjects.values()) {
       if (!subject.bookId) continue;
       const row = byKey[editionKey(subject.title, subject.author)];
@@ -144,7 +145,7 @@ export function Ratings() {
         void ensureOwnCover(subject.bookId);
       }
     }
-  }, [shelfMode, subjects, byKey, ownCoverById, ensureOwnCover]);
+  }, [lookupCoversOnline, subjects, byKey, ownCoverById, ensureOwnCover]);
 
   const extras = useMemo((): Record<string, SpineExtras> => {
     const out: Record<string, SpineExtras> = {};
@@ -179,9 +180,9 @@ export function Ratings() {
      nobody opened — and the run is paced at one a second, so it is not
      free even when it is idle. */
   useEffect(() => {
-    if (shelfMode !== 'shelf' || !ratings.length) return;
+    if (!lookupCoversOnline || !ratings.length) return;
     void fill([...subjects.values()]);
-  }, [shelfMode, subjects, ratings.length, fill]);
+  }, [lookupCoversOnline, subjects, ratings.length, fill]);
 
   const closeSheets = () => {
     setEditing(null);
@@ -233,24 +234,26 @@ export function Ratings() {
                 ))}
               </div>
 
-              {/* Two readings of the same shelf, not a display preference.
-                  See the note at the top of engine/spine.ts: the realistic
-                  one gives height and colour back to the object and hands
-                  the score down to the stamp at the foot. */}
+              {/* Not a display mode any more — see the note at the top of
+                  engine/spine.ts, the shelf draws one way now. This is
+                  consent: switching it off stops the shelf asking Google
+                  Books, Open Library and Wikipedia about your books, and
+                  every book not yet looked up falls back to the mood it
+                  was rated in rather than going unlabelled. */}
               <div className="segment">
                 <button
-                  className={shelfMode === 'data' ? 'on' : ''}
-                  onClick={() => setSetting('shelfMode', 'data')}
-                  title="Colour is the mood, height is the score"
+                  className={lookupCoversOnline ? 'on' : ''}
+                  onClick={() => setSetting('lookupCoversOnline', true)}
+                  title="Ask outside catalogues for covers and printings"
                 >
-                  Data
+                  Covers online
                 </button>
                 <button
-                  className={shelfMode === 'shelf' ? 'on' : ''}
-                  onClick={() => setSetting('shelfMode', 'shelf')}
-                  title="The books as they actually look"
+                  className={!lookupCoversOnline ? 'on' : ''}
+                  onClick={() => setSetting('lookupCoversOnline', false)}
+                  title="Draw every book from its rating alone"
                 >
-                  Shelf
+                  Off
                 </button>
               </div>
 
@@ -260,7 +263,7 @@ export function Ratings() {
                   round trip to our own Worker and nothing to any
                   catalogue. It is the answer to a wrong cover, and to a
                   fix that shipped and did not seem to arrive. */}
-              {shelfMode === 'shelf' && !filling && (
+              {lookupCoversOnline && !filling && (
                 <button
                   className="linky muted"
                   onClick={() => void refill([...subjects.values()])}
@@ -271,12 +274,12 @@ export function Ratings() {
               )}
             </div>
 
-            {shelfMode === 'shelf' && (filling || trouble) && (
+            {lookupCoversOnline && (filling || trouble) && (
               <p className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
-                {/* The realistic shelf degrades to the ordinary one when a
-                    lookup fails, which is right — and which also makes
-                    every possible failure look identical from here: you
-                    press Shelf and nothing happens. So say which one. */}
+                {/* A lookup failure degrades to the mood fallback, which is
+                    right — and which also makes every possible failure
+                    look identical from here: nothing seems to happen. So
+                    say which one. */}
                 {trouble
                   ? (trouble.detail ?? TROUBLE[trouble.kind])
                   : 'Finding covers — the shelf fills in as they arrive.'}
@@ -286,7 +289,6 @@ export function Ratings() {
             <SpineWall
               ratings={wall}
               dark={dark}
-              mode={shelfMode}
               extras={extras}
               activeId={editing?.id}
               onOpen={(r) => setEditing(r)}

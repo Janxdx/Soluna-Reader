@@ -1,30 +1,41 @@
 /* How a book is drawn standing up.
  *
- * The shelf has two modes and this file is the whole difference between
- * them.
+ * One shelf, drawn from whatever is known about each book — the honest
+ * version of a choice that used to be a toggle. Three things, layered so a
+ * half-known book still looks like a book rather than a mismatch of two
+ * styles:
  *
- *   Data     colour is the mood you chose, height is the score you gave,
- *            thickness is the length of the book. Three facts about your
- *            reading, legible from across the room without a legend. This
- *            is what the shelf has always been.
+ *   Thickness   real page count where one is known, else the word count a
+ *               rating already carries. Both readings always fell back
+ *               this way; there was never a second thickness to merge.
  *
- *   Shelf    colour is the book's actual cover, height and thickness are
- *            its actual paper, and a book from a series that has a livery
- *            is drawn in it. What a real shelf of these books looks like.
+ *   Height      real millimetres where the catalogue or a matched livery
+ *               says so. Otherwise a height derived from the book's own
+ *               length, with a small deterministic jitter on top — a
+ *               flat default height for everything unknown reads as a
+ *               fence, not a shelf, and jittering from the title rather
+ *               than the clock keeps a given shelf looking the same on
+ *               every launch.
  *
- * They cannot both be true at once, and pretending otherwise is the trap.
- * A realistic spine takes two of the three data channels away: a Reclam is
- * short because it is a Reclam, not because you disliked it. What survives
- * into the realistic mode is the thickness — a long book is a thick book in
- * both readings — and the score, which comes back as a number stamped at
- * the foot. You have to walk up and read it, exactly as you would with a
- * real shelf, and that is the honest trade rather than a compromise.
+ *   Colour      the cover's own bound colour where a cover exists, a
+ *               matched publisher's livery where one applies (and a
+ *               livery beats the cover: it is what the spine *is*, not an
+ *               inference about it), and the mood you rated the book in
+ *               as the last resort. That last fallback is not a
+ *               downgrade — it is the whole reason a shelf of nothing but
+ *               ratings still reads as a shelf, and it is also the only
+ *               place score used to live. It doesn't any more: with
+ *               height spoken for by the object's own size, the score
+ *               survives only as the number stamped at the foot, which
+ *               you have to walk up and read, exactly as you would with a
+ *               real shelf. The mood ribbon, the score curve and the
+ *               radar below the wall are where the numbers actually live
+ *               now.
  *
  * Browser-free like the rest of engine/: colours in, CSS values out, no DOM.
  */
 
 import {
-  DEFAULT_HEIGHT_MM,
   liveryFor,
   realMetrics,
   spineDirection,
@@ -34,8 +45,6 @@ import {
   type SpineDirection,
 } from './edition';
 import { moodColor, moodInk, moodOf, spineWeight, type RatingRecord } from './rating';
-
-export type ShelfMode = 'data' | 'shelf';
 
 /* ── colour helpers ────────────────────────────────────────────────── */
 
@@ -134,37 +143,54 @@ export interface SpineLook {
       layer under the same lit/shadowed sheen `bind` paints for everyone
       else. */
   textureUrl?: string;
-  /** true when this is drawn from real data rather than from the rating */
+  /** true when this is drawn from real data rather than an unknown book's
+      fallback */
   real: boolean;
 }
-
-/* Thickness in the data mode: unchanged from what the wall has always done.
-   Logarithmic, because book lengths are — the step from 30k words to 60k is
-   the same *kind* of difference as 150k to 300k, and a linear map spends
-   most of its range on the handful of long ones. */
-const MIN_W = 21;
-const MAX_W = 52;
-const THIN_BOOK = 25_000;
-const THICK_BOOK = 260_000;
-
-function dataWidth(r: RatingRecord): number {
-  const words = spineWeight(r);
-  const t =
-    (Math.log(Math.max(THIN_BOOK, Math.min(THICK_BOOK, words))) - Math.log(THIN_BOOK)) /
-    (Math.log(THICK_BOOK) - Math.log(THIN_BOOK));
-  return Math.round(MIN_W + t * (MAX_W - MIN_W));
-}
-
-/* Height in the data mode. A nought still stands at 40%: a book you hated is
-   still a book you finished, and a shelf where the bad ones vanish is a
-   shelf that lies about how the year went. */
-const dataHeight = (r: RatingRecord): string =>
-  `${(40 + (Math.max(0, Math.min(10, r.overall)) / 10) * 60).toFixed(1)}%`;
 
 /** The gradient that makes a flat rectangle look like a bound edge: lit down
     the left where the light falls, shadowed at the right where it turns away. */
 const bind = (face: string, lip: string, edge: string): string =>
   `linear-gradient(100deg, ${lip} 0 8%, ${face} 22% 78%, ${edge} 100%)`;
+
+/* ── height for a book whose real trim size isn't known ──────────────
+ *
+ * The common case for anything logged by hand rather than looked up. A
+ * flat default height for every such book would make the "unknown" rows
+ * of a shelf a visible fence — the one thing a real shelf never is, even
+ * one nobody has catalogued. Trim height correlates loosely with length
+ * (a doorstop novel is rarely a duodecimo), so the same length signal that
+ * sets thickness sets a baseline here too, with a small jitter on top so
+ * two books of similar length don't stand dead level with each other.
+ *
+ * The jitter is hashed from the title rather than drawn from `Math.random`
+ * on purpose: a shelf that reshuffled its own guesses on every launch
+ * would read as broken, not alive. Hashing the title keeps a given book at
+ * the same guessed height for as long as it goes unlooked-up, and gives it
+ * a new, real one the moment a lookup lands.
+ */
+const THIN_BOOK = 25_000;
+const THICK_BOOK = 260_000;
+const MIN_H = 55;
+const MAX_H = 88;
+const JITTER_H = 7;
+
+function titleHash(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
+  return h >>> 0;
+}
+
+function jitterHeight(rating: RatingRecord): string {
+  const words = spineWeight(rating);
+  const t =
+    (Math.log(Math.max(THIN_BOOK, Math.min(THICK_BOOK, words))) - Math.log(THIN_BOOK)) /
+    (Math.log(THICK_BOOK) - Math.log(THIN_BOOK));
+  const base = MIN_H + t * (MAX_H - MIN_H);
+  const jitter = ((titleHash(rating.title) % 1000) / 1000 - 0.5) * 2 * JITTER_H;
+  const h = Math.max(40, Math.min(96, base + jitter));
+  return `${h.toFixed(1)}%`;
+}
 
 export interface LookInput {
   rating: RatingRecord;
@@ -173,7 +199,6 @@ export interface LookInput {
   publisher?: string;
   /** the edition's language, for which way the title runs */
   language?: string;
-  mode: ShelfMode;
   dark: boolean;
 }
 
@@ -181,11 +206,11 @@ export interface LookInput {
  * How to draw one book.
  *
  * Falls back a step at a time rather than all at once, which matters
- * because a half-known book is the common case: a shelf where the six books
- * with covers look real and the rest look like the old wall is a mess, so
- * the realistic mode uses whatever it has — real thickness from a page
- * count with no cover, real colour from a cover with no page count — and
- * only what is genuinely unknown falls back to the mood.
+ * because a half-known book is the common case: a shelf where the six
+ * books with covers look real and the rest look like a placeholder is a
+ * mess, so this uses whatever it has — real thickness from a page count
+ * with no cover, real colour from a cover with no page count — and only
+ * what is genuinely unknown falls back to the mood.
  */
 /**
  * Whether an edition record says anything a shelf can draw.
@@ -205,14 +230,14 @@ export const knowsAnything = (e: EditionData): boolean =>
   Boolean(e.palette?.length || e.pageCount || e.publisher || e.series || e.heightMm);
 
 export function spineLook(input: LookInput): SpineLook {
-  const { rating, edition, mode, dark } = input;
+  const { rating, edition, dark } = input;
   const mood = moodOf(rating.mood);
 
-  if (mode === 'data' || !edition || !knowsAnything(edition)) {
+  if (!edition || !knowsAnything(edition)) {
     const face = moodColor(mood, dark);
     return {
-      width: dataWidth(rating),
-      height: dataHeight(rating),
+      width: realMetrics({ words: rating.words }).width,
+      height: jitterHeight(rating),
       background: bind(face, moodColor(mood, dark, 7), moodColor(mood, dark, -9)),
       ink: moodInk(mood, dark),
       accent: moodInk(mood, dark),
@@ -231,15 +256,19 @@ export function spineLook(input: LookInput): SpineLook {
     series: edition.series,
   });
 
+  /* A livery knows its own trim height, and it is a better number than a
+     flat default: a Reclam is 148 mm and a Manesse is 168, and neither is
+     the 190 that "a book" means. Only the catalogue's own measurement
+     beats it, since that one is about this printing rather than the
+     series. Nothing here falls back to a flat default any more — where
+     neither is known, the height guess above is used instead. */
+  const resolvedHeightMm = edition.heightMm ?? livery?.heightMm;
   const metrics = realMetrics({
-    /* A livery knows its own trim height, and it is a better number than a
-       default: a Reclam is 148 mm and a Manesse is 168, and neither is the
-       190 that "a book" means. Only the catalogue's own measurement beats
-       it, since that one is about this printing rather than the series. */
-    heightMm: edition.heightMm ?? livery?.heightMm ?? DEFAULT_HEIGHT_MM,
+    heightMm: resolvedHeightMm,
     pageCount: edition.pageCount,
     words: rating.words,
   });
+  const height = resolvedHeightMm ? metrics.height : jitterHeight(rating);
 
   const ground =
     /* The livery wins over the cover's own colours, which sounds backwards
@@ -252,7 +281,8 @@ export function spineLook(input: LookInput): SpineLook {
   const accent = livery?.accent ?? (edition.palette?.[1] ?? shade(ground, luma(ground) > 0.5 ? -0.35 : 0.35));
 
   return {
-    ...metrics,
+    width: metrics.width,
+    height,
     background: bind(ground, shade(ground, 0.16), shade(ground, -0.22)),
     ink,
     accent,

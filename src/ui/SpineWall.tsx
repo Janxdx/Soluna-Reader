@@ -1,17 +1,11 @@
 /* The shelf.
  *
- * Every book you have rated, standing as a spine. It draws two ways, and
- * which one is a real choice rather than a display option — see the note at
- * the top of engine/spine.ts, where the trade lives.
- *
- *   Data     colour is the mood, height is the score, thickness is the
- *            length. Three properties read off a shelf without a legend,
- *            because they are properties a real shelf already has.
- *
- *   Shelf    the books as objects: the cover's own colours, the paper's own
- *            thickness, the series' own livery, and the title running the
- *            way that language's spines run. The score survives as the
- *            number stamped at the foot.
+ * Every book you have rated, standing as a spine, drawn from whatever is
+ * known about it — see the note at the top of engine/spine.ts for how a
+ * half-known book still ends up looking like a book. Colour is the cover's
+ * own where there is one, or a livery, or the mood you rated it in; height
+ * and thickness are the object's own size where it's known, or a guess
+ * from its length otherwise; the score is the number stamped at the foot.
  *
  * Layout note. Each spine sits in a fixed-height slot with no horizontal
  * gap, so the slots' bottom edges form one continuous shelf line per row.
@@ -23,7 +17,7 @@
  */
 
 import { useMemo } from 'react';
-import { spineLook, type ShelfMode, type SpineLook } from '../engine/spine';
+import { spineLook, type SpineLook } from '../engine/spine';
 import type { RatingRecord } from '../engine/rating';
 import type { EditionData } from '../engine/edition';
 
@@ -60,7 +54,6 @@ function faceStyle(look: SpineLook): React.CSSProperties {
 interface Props {
   ratings: RatingRecord[];
   dark: boolean;
-  mode: ShelfMode;
   /** by rating id — absent means "nothing known", which is a normal state */
   extras: Record<string, SpineExtras>;
   onOpen: (rating: RatingRecord) => void;
@@ -68,7 +61,7 @@ interface Props {
   activeId?: string | null;
 }
 
-export function SpineWall({ ratings, dark, mode, extras, onOpen, activeId }: Props) {
+export function SpineWall({ ratings, dark, extras, onOpen, activeId }: Props) {
   /* Recomputed only when the shelf, the mode or the theme changes — this
      runs over every spine and the wall re-renders on hover. `extras` is in
      the dependency list by identity, so the tab must hand over a new object
@@ -79,14 +72,13 @@ export function SpineWall({ ratings, dark, mode, extras, onOpen, activeId }: Pro
         r,
         look: spineLook({
           rating: r,
-          mode,
           dark,
           edition: extras[r.id]?.edition,
           publisher: extras[r.id]?.publisher,
           language: extras[r.id]?.language,
         }),
       })),
-    [ratings, dark, mode, extras]
+    [ratings, dark, extras]
   );
 
   return (

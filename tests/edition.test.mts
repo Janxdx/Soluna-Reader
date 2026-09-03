@@ -187,7 +187,10 @@ ok('Penguin orange survives', !isPaperOrInk(0xe8, 0x72, 0x1c));
 ok('a deep blue is not ink', !isPaperOrInk(29, 42, 58));
 ok('a mid grey is neither', !isPaperOrInk(128, 128, 128));
 
-/* ── the two shelves ────────────────────────────────────────────────── */
+/* ── one shelf ──────────────────────────────────────────────────────
+   The Data/Shelf toggle is gone — see the note at the top of spine.ts.
+   spineLook() now falls back a step at a time within a single reading
+   rather than switching between two of them. */
 
 const rating: RatingRecord = {
   id: 'r1',
@@ -201,60 +204,61 @@ const rating: RatingRecord = {
   updatedAt: 0,
 };
 
-const dataLook = spineLook({ rating, mode: 'data', dark: false });
-ok('the data shelf is not claiming to be real', !dataLook.real);
-ok('the data shelf still draws without an edition', dataLook.width > 0);
+/* Nothing known about the book at all — no edition passed. */
+const unknownLook = spineLook({ rating, dark: false });
+ok('an unknown book is not claiming to be real', !unknownLook.real);
+ok('an unknown book still draws', unknownLook.width > 0);
+ok('and stands at some real height', parseFloat(unknownLook.height) > 0);
 
-/* A high score stands taller than a low one — the whole premise of the
-   data shelf, and the thing the realistic one gives up. */
-const low = spineLook({ rating: { ...rating, overall: 2 }, mode: 'data', dark: false });
-ok('score is height in the data shelf', parseFloat(dataLook.height) > parseFloat(low.height));
+/* The score used to be the data shelf's height; it isn't any more —
+   height is guessed from length and jittered from the title, and the
+   score survives only as the number stamped at the foot. So a rating's
+   `overall` must not move an unknown book's height at all. */
+const lowScore = spineLook({ rating: { ...rating, overall: 2 }, dark: false });
+eq('score no longer sets height', unknownLook.height, lowScore.height);
+
+/* The jitter is hashed from the title, not drawn at random, so the same
+   book gets the same guessed height on every call. */
+const again = spineLook({ rating, dark: false });
+eq('the height guess is deterministic', unknownLook.height, again.height);
 
 const shelfLook = spineLook({
   rating,
-  mode: 'shelf',
   dark: false,
   edition: { key: 'k', publisher: 'Reclam', pageCount: 96, palette: ['#8a3324'] },
   language: 'de',
 });
-ok('the realistic shelf says so', shelfLook.real);
+ok('a known book says so', shelfLook.real);
 eq('a Reclam is drawn in Reclam yellow',
   shelfLook.background.toLowerCase().includes('#f2c900'), true);
 eq('and carries its imprint', shelfLook.imprint, 'Reclam');
 eq('and reads downwards', shelfLook.direction, 'down');
-ok('and stands shorter than a novel',
+ok('and stands shorter than a novel of unknown trim size',
   parseFloat(shelfLook.height) < parseFloat(
     spineLook({
       rating,
-      mode: 'shelf',
       dark: false,
       edition: { key: 'k', pageCount: 320 },
     }).height
   ));
-
-/* Asking for the realistic shelf when nothing is known must not produce a
-   blank: it falls back to exactly what the data shelf would have drawn. */
-const unknown = spineLook({ rating, mode: 'shelf', dark: false });
-eq('an unknown book falls back to the mood', unknown.background, dataLook.background);
-ok('and is honest about not being real', !unknown.real);
 
 /* A lookup that found nothing still writes a row, so that the app stops
    asking. The shelf must treat that row as "unknown" and not as "a book
    with no publisher" — otherwise every book the catalogues missed comes
    out the same default height in the same colour. */
 const foundNothing = spineLook({
-  rating, mode: 'shelf', dark: false,
+  rating, dark: false,
   edition: { key: 'k' },
 });
-eq('an empty edition row is still unknown', foundNothing.background, dataLook.background);
+eq('an empty edition row is still unknown', foundNothing.background, unknownLook.background);
 ok('and does not claim to be real', !foundNothing.real);
-eq('and keeps the score as height', foundNothing.height, dataLook.height);
+eq('and guesses height the same way as no edition at all', foundNothing.height, unknownLook.height);
 
 /* A cover but no page count, and a page count but no cover, are both the
-   common case — a shelf where those fall back to the old wall would be a
+   common case — a shelf where those fell back to a placeholder would be a
    mess of two styles. */
 const colourOnly = spineLook({
-  rating, mode: 'shelf', dark: false,
+  rating, dark: false,
   edition: { key: 'k', palette: ['#8a3324'] },
 });
 ok('a cover with no page count is still drawn for real', colourOnly.real);
