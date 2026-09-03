@@ -100,6 +100,17 @@ ok('level axes still get a tagline', tasteProfile(level).tagline.length > 0);
 const old = tasteProfile([rate({ ratedAt: Date.now() - 400 * day }), rate({})]);
 eq('a rating from last year is not this year', old.thisYear, 1);
 
+/* thisMonth is a calendar boundary, not a rolling window — built from
+   the first of the current month rather than a day count, so the test
+   holds regardless of what day of the month it's run on. One rating at
+   the exact boundary, one a millisecond before it. */
+const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
+const monthly = tasteProfile([
+  rate({ ratedAt: startOfMonth }),
+  rate({ ratedAt: startOfMonth - 1 }),
+]);
+eq('the boundary belongs to this month, one ms before does not', monthly.thisMonth, 1);
+
 /* ── sorting ────────────────────────────────────────────────────── */
 
 eq('by rating, best first', sortRatings(shelf, 'rating').map((r) => r.overall), [9.5, 8, 6, 4.5]);
