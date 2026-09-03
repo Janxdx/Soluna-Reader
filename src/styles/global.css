@@ -1724,7 +1724,7 @@ input[type='range']::-moz-range-thumb {
   transform-style: preserve-3d;
 }
 
-.book {
+.tome {
   /* the shared `button` reset a few hundred lines up already strips the
      platform chrome; only what's specific to a 3D object goes here */
   display: block;
@@ -1740,7 +1740,7 @@ input[type='range']::-moz-range-thumb {
     filter 380ms var(--ease-spring);
 }
 @media (prefers-reduced-motion: reduce) {
-  .book {
+  .tome {
     animation: none;
     transition: none;
   }
@@ -1751,22 +1751,22 @@ input[type='range']::-moz-range-thumb {
     transform: translateY(22px);
   }
 }
-.book:hover,
-.book:focus-visible,
-.book.on {
+.tome:hover,
+.tome:focus-visible,
+.tome.on {
   /* pulled a little way off the shelf */
   transform: translateY(-14px);
   filter: drop-shadow(0 14px 26px rgba(20, 14, 8, 0.3));
   outline: none;
 }
-.book:active {
+.tome:active {
   transform: translateY(-6px);
 }
 @media (prefers-reduced-motion: reduce) {
-  .book:hover,
-  .book:focus-visible,
-  .book.on,
-  .book:active {
+  .tome:hover,
+  .tome:focus-visible,
+  .tome.on,
+  .tome:active {
     transform: none;
     filter: drop-shadow(0 2px 5px rgba(20, 14, 8, 0.22));
   }
@@ -1776,7 +1776,7 @@ input[type='range']::-moz-range-thumb {
    Every face below is a child of this, positioned in its local 3D space,
    so rotating it turns the whole book at once rather than each face
    independently. */
-.body {
+.tome-body {
   position: absolute;
   inset: 0;
   transform-style: preserve-3d;
@@ -1971,7 +1971,7 @@ input[type='range']::-moz-range-thumb {
    own aspect ratio in SpineWall.tsx, clamped so a very square or very
    tall cover still reads as a plausible paperback rather than a domino
    or a plank. */
-.cover {
+.tome-cover {
   position: absolute;
   top: 0;
   left: 100%;
@@ -1983,8 +1983,8 @@ input[type='range']::-moz-range-thumb {
   border-radius: 0 2px 2px 0;
   box-shadow: inset 5px 0 9px -7px rgba(0, 0, 0, 0.55);
 }
-.cover img,
-.cover-fallback {
+.tome-cover img,
+.tome-cover-fallback {
   display: block;
   width: 100%;
   height: 100%;

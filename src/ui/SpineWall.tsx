@@ -284,12 +284,12 @@ function Spine({
   return (
     <div className="slot" role="listitem" style={{ width: look.width, '--ry': `${ry}deg` } as React.CSSProperties}>
       <button
-        className={`book${active ? ' on' : ''}`}
+        className={`tome${active ? ' on' : ''}`}
         style={{ height: look.height, animationDelay: `${entryDelay}ms` }}
         onClick={() => onOpen(r)}
         title={`${r.title}${r.author ? ` — ${r.author}` : ''} · ${r.overall}/10`}
       >
-        <span className="body">
+        <span className="tome-body">
           {/* the spine itself — everything the flat wall used to be */}
           <span
             className={`face spine p-${look.pattern}${look.real ? ' real' : ''}`}
@@ -305,11 +305,11 @@ function Spine({
 
           {/* the front cover, turned to face the room */}
           {!flat && (
-            <span className="cover" style={{ width: depthPx }}>
+            <span className="tome-cover" style={{ width: depthPx }}>
               {coverUrl ? (
                 <img src={coverUrl} alt="" loading="lazy" decoding="async" />
               ) : (
-                <span className="cover-fallback" style={faceStyle(look, dark)} />
+                <span className="tome-cover-fallback" style={faceStyle(look, dark)} />
               )}
             </span>
           )}
