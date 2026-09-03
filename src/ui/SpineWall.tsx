@@ -23,11 +23,20 @@
  * once, which is the one place this shelf could visibly drop frames.
  */
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import { spineLook, type SpineLook } from '../engine/spine';
 import { breakRows } from '../engine/shelf';
 import type { RatingRecord } from '../engine/rating';
 import type { EditionData } from '../engine/edition';
+import { PeekCard, type PeekAnchor } from './PeekCard';
 
 /** What the wall needs to know about a book beyond its rating. Supplied by
     the tab, which is the thing holding the stores. */
@@ -131,6 +140,12 @@ function useCoverAspects(coverUrls: Record<string, string>): Record<string, numb
    cheaper and more honest than drawing two faces nobody can see. */
 const FLAT_THRESHOLD = 4;
 
+/* How long a touch has to hold still before it counts as a press rather
+   than the start of a tap or a scroll; how far it's allowed to drift
+   before that counts as a scroll starting instead. */
+const HOLD_MS = 480;
+const HOLD_SLOP = 10;
+
 interface Props {
   ratings: RatingRecord[];
   dark: boolean;
@@ -215,7 +230,43 @@ export function SpineWall({ ratings, dark, extras, coverUrls, onOpen, activeId }
   const slotH = useSlotHeightPx();
   const aspects = useCoverAspects(coverUrls);
 
+  /* Checked once, not per book: a mouse tracks in and out of a hundred
+     spines, and a `matchMedia` read for each would be a hundred reads of
+     the same answer. Absent on touch, which is exactly the split the
+     peek card needs — see the note at the top of PeekCard.tsx. */
+  const hoverCapable = useMemo(
+    () => typeof matchMedia === 'function' && matchMedia('(hover: hover)').matches,
+    []
+  );
+
+  const [peek, setPeek] = useState<PeekAnchor | null>(null);
+  const onPeek = useCallback((id: string, rect: DOMRect | null) => {
+    setPeek(rect ? { id, rect } : null);
+  }, []);
+  /* The anchor rect is captured once, at the moment a hover or a hold
+     starts — cheaper than tracking it live, and right for everything
+     that actually moves a book: a re-sort re-fans the whole row (see the
+     file header), which is exactly why the sort/filter changing at all,
+     by way of a new `ratings` array, drops whatever was showing rather
+     than leaving a card pointing at empty air. A resize does the same to
+     every row's own width, so `wallWidth` clears it too. Scrolling isn't
+     caught by either — `.scroller` is what actually scrolls, not the
+     window, and its own scroll doesn't bubble, so this listens for it in
+     the capture phase on `window`, the standard way to hear a
+     non-bubbling event from an arbitrary descendant. */
+  useEffect(() => setPeek(null), [ratings, wallWidth]);
+  useEffect(() => {
+    if (!peek) return;
+    const dismiss = () => setPeek(null);
+    window.addEventListener('scroll', dismiss, true);
+    return () => window.removeEventListener('scroll', dismiss, true);
+  }, [peek]);
+
   let entryIndex = 0;
+
+  const peekedMeta = peek ? meta.get(peek.id) : undefined;
+  const peekedLook = peek ? looks.find((l) => l.id === peek.id)?.look : undefined;
+  const peekedExtras = peek ? extras[peek.id] : undefined;
 
   return (
     <div className="wall3d" ref={wallRef} role="list">
@@ -243,11 +294,23 @@ export function SpineWall({ ratings, dark, extras, coverUrls, onOpen, activeId }
                    take visibly longer to finish than it's worth. */
                 entryDelay={ri === 0 ? Math.min(i, 24) * 22 : 0}
                 onOpen={onOpen}
+                onPeek={onPeek}
+                hoverCapable={hoverCapable}
               />
             );
           })}
         </div>
       ))}
+      {peek && peekedMeta && peekedLook && (
+        <PeekCard
+          anchor={peek}
+          rating={peekedMeta.rating}
+          look={peekedLook}
+          edition={peekedExtras?.edition}
+          publisher={peekedExtras?.publisher}
+          dark={dark}
+        />
+      )}
     </div>
   );
 }
@@ -263,6 +326,8 @@ function Spine({
   active,
   entryDelay,
   onOpen,
+  onPeek,
+  hoverCapable,
 }: {
   rating: RatingRecord;
   look: SpineLook;
@@ -274,6 +339,8 @@ function Spine({
   active: boolean;
   entryDelay: number;
   onOpen: (rating: RatingRecord) => void;
+  onPeek: (id: string, rect: DOMRect | null) => void;
+  hoverCapable: boolean;
 }) {
   const flat = Math.abs(ry) < FLAT_THRESHOLD;
   const heightPx = slotH * (parseFloat(look.height) / 100);
@@ -281,12 +348,79 @@ function Spine({
   const depthPx = Math.round(heightPx * depthFrac);
   const showImprint = Boolean(look.imprint) && look.width >= 26;
 
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const holdTimer = useRef<number | undefined>(undefined);
+  const holdStart = useRef<{ x: number; y: number } | null>(null);
+  /* Set the moment a hold fires, so the tap that ends it (touch sends a
+     click after pointerup, same as a real tap does) can be told apart
+     from an actual tap and swallowed instead of opening the sheet. */
+  const heldRef = useRef(false);
+
+  const clearHold = () => {
+    if (holdTimer.current !== undefined) {
+      window.clearTimeout(holdTimer.current);
+      holdTimer.current = undefined;
+    }
+    holdStart.current = null;
+  };
+
+  const handlePointerDown = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    if (e.pointerType !== 'touch') return;
+    holdStart.current = { x: e.clientX, y: e.clientY };
+    clearHold();
+    holdTimer.current = window.setTimeout(() => {
+      const el = btnRef.current;
+      if (!el) return;
+      heldRef.current = true;
+      onPeek(r.id, el.getBoundingClientRect());
+    }, HOLD_MS);
+  };
+  const handlePointerMove = (e: ReactPointerEvent<HTMLButtonElement>) => {
+    if (e.pointerType !== 'touch' || !holdStart.current) return;
+    const dx = e.clientX - holdStart.current.x;
+    const dy = e.clientY - holdStart.current.y;
+    /* Drifted far enough that this reads as the start of a scroll, not a
+       hold — don't let the shelf eat the gesture. */
+    if (Math.hypot(dx, dy) > HOLD_SLOP) clearHold();
+  };
+  const handlePointerEnd = () => {
+    clearHold();
+    if (heldRef.current) onPeek(r.id, null);
+  };
+  const handleMouseEnter = () => {
+    if (!hoverCapable) return;
+    const el = btnRef.current;
+    if (!el) return;
+    onPeek(r.id, el.getBoundingClientRect());
+  };
+  const handleMouseLeave = () => {
+    if (!hoverCapable) return;
+    onPeek(r.id, null);
+  };
+  const handleClick = () => {
+    /* The tap that ended a hold, not a tap on its own — the peek card
+       already said everything this click would have opened the sheet
+       to see. */
+    if (heldRef.current) {
+      heldRef.current = false;
+      return;
+    }
+    onOpen(r);
+  };
+
   return (
     <div className="slot" role="listitem" style={{ width: look.width, '--ry': `${ry}deg` } as React.CSSProperties}>
       <button
+        ref={btnRef}
         className={`tome${active ? ' on' : ''}`}
         style={{ height: look.height, animationDelay: `${entryDelay}ms` }}
-        onClick={() => onOpen(r)}
+        onClick={handleClick}
+        onMouseEnter={handleMouseEnter}
+        onMouseLeave={handleMouseLeave}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerEnd}
+        onPointerCancel={handlePointerEnd}
         title={`${r.title}${r.author ? ` — ${r.author}` : ''} · ${r.overall}/10`}
       >
         <span className="tome-body">

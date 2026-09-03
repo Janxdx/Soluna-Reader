@@ -2136,6 +2136,59 @@ input[type='range']::-moz-range-thumb {
   color: var(--accent-ink);
 }
 
+/* ── the peek card ───────────────────────────────────────────────────
+   SHELF-3D.md §8. Portal-rendered to `document.body` by PeekCard.tsx —
+   see the note at the top of that file for why it can't be a descendant
+   of `.shelf-row`. `pointer-events: none` because it's read-only and
+   sits over the row: a card that could itself be hovered would keep a
+   mouse moving toward it from ever clearing the book underneath. */
+.peek-card {
+  position: fixed;
+  z-index: 250;
+  width: min(240px, calc(100vw - 20px));
+  padding: var(--s4);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-2);
+  pointer-events: none;
+  transition: opacity 120ms var(--ease-out);
+}
+.peek-title {
+  font-family: var(--font-display);
+  font-size: 17px;
+  line-height: 1.25;
+  font-weight: 600;
+}
+.peek-facts {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  margin-top: 4px;
+}
+.peek-score {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ink-2);
+  margin-top: 8px;
+}
+.peek-score i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex: none;
+}
+.peek-teaser {
+  font-family: var(--font-read);
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-2);
+  margin-top: 8px;
+}
+
 /* ── what the world knows about a book ─────────────────────────────
    The cover, the printing and the opening of the Wikipedia article, under
    the title in the rating sheet. Deliberately quiet: it sits next to the
