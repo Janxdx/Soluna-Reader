@@ -1646,11 +1646,17 @@ input[type='range']::-moz-range-thumb {
    The one screen in Soluna that spends colour. Everywhere else a single
    warm accent does all the work and the palette stays out of the way;
    here the colour *is* the data, and the restraint elsewhere is what
-   makes eight cloth colours land as meaning rather than as decoration. */
+   makes eight cloth colours land as meaning rather than as decoration.
 
-/* Sort on the left, the two readings of the shelf on the right. They wrap
-   onto separate lines on a phone rather than shrinking, because a segmented
-   control with four squeezed labels is worse than two lines. */
+   Every book is four real CSS faces on one `preserve-3d` body — spine,
+   cover, fore-edge, top — fanned around a per-row vanishing point. See
+   SHELF-3D.md for the reference this draws from and engine/shelf.ts for
+   where the fan angle and the row breaking happen; a wrapping flex
+   container can't do either on its own. */
+
+/* Sort on the left, the network setting on the right. They wrap onto
+   separate lines on a phone rather than shrinking, because a segmented
+   control with squeezed labels is worse than two lines. */
 .shelf-controls {
   display: flex;
   flex-wrap: wrap;
@@ -1660,56 +1666,82 @@ input[type='range']::-moz-range-thumb {
   margin-bottom: 20px;
 }
 
-.wall {
+.wall3d {
   --slot-h: 250px;
   --row-gap: 48px;
   display: flex;
-  flex-wrap: wrap;
-  align-items: flex-end;
-  /* stated explicitly: `stretch` would let wrapped rows grow to fill spare
-     height, and the shelf-line gradient below depends on a constant pitch */
-  align-content: flex-start;
-  gap: var(--row-gap) 0;
+  flex-direction: column;
+  gap: var(--row-gap);
   padding-top: 6px;
-  /* The shelf line under each row. A repeating gradient rather than a
-     border on the slots: rows have a constant pitch, so this lands on
-     every baseline — including the ones wrapping has not made yet — and
-     the last row gets a full-width shelf instead of one that stops under
-     the final book. */
-  background-image: repeating-linear-gradient(
-    to bottom,
-    transparent 0,
-    transparent calc(var(--slot-h) + 6px),
-    var(--line-strong) calc(var(--slot-h) + 6px),
-    var(--line-strong) calc(var(--slot-h) + 8px),
-    rgba(0, 0, 0, 0.05) calc(var(--slot-h) + 8px),
-    transparent calc(var(--slot-h) + 18px),
-    transparent calc(var(--slot-h) + var(--row-gap))
-  );
 }
 @media (max-width: 640px) {
-  .wall {
+  .wall3d {
     --slot-h: 178px;
     --row-gap: 36px;
   }
 }
 
-/* Slots have no horizontal gap, so real books touch the way they do on a
-   real shelf. What separates them is the lit left edge and shadowed right
-   of each spine, which is also what gives the wall its depth. */
-.slot {
-  height: var(--slot-h);
+/* One row, one vanishing point. `perspective-origin` sits a little below
+   centre (62% down) so the shelf reads as seen slightly from above, the
+   way a shelf at chest height actually is. `content-visibility` skips
+   layout and paint for rows scrolled off-screen — the shelf's own answer
+   to a library long enough to need it. */
+.shelf-row {
+  position: relative;
   display: flex;
   align-items: flex-end;
+  perspective: 1400px;
+  perspective-origin: 50% 62%;
+  contain: layout paint;
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--slot-h);
+}
+
+/* The board: almost nothing, on purpose — a hairline and the shadow it
+   casts, sized to the row's own occupied width so a ragged last row gets
+   a board that stops where the books do rather than running the full
+   container. No wood, no texture; see SHELF-3D.md §1. */
+.shelf-row::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -9px;
+  height: 1px;
+  background: var(--line-strong);
+  box-shadow: 0 11px 22px -6px rgba(20, 14, 8, 0.3);
+  pointer-events: none;
+}
+
+/* Slots have no horizontal gap, so real books touch the way they do on a
+   real shelf. `--ry` is set once per book by the row breaker and never
+   transitions — see the note at the top of SpineWall.tsx: a re-sort
+   re-fans the whole row, and animating that many 3D rotations at once is
+   the one place this shelf could cost frames, so it snaps instead. */
+.slot {
+  height: var(--slot-h);
   flex: none;
+  transform-style: preserve-3d;
+}
+
+.book {
+  /* the shared `button` reset a few hundred lines up already strips the
+     platform chrome; only what's specific to a 3D object goes here */
+  display: block;
+  width: 100%;
+  height: 100%;
+  position: relative;
+  cursor: pointer;
+  transform-style: preserve-3d;
   animation: shelve 620ms var(--ease-out) both;
-  /* Switching between the two readings of the shelf moves the same books
-     rather than rebuilding the wall, so the change is legible: you can
-     watch the Reclam drop to its real height. */
-  transition: width 520ms var(--ease-spring);
+  filter: drop-shadow(0 2px 5px rgba(20, 14, 8, 0.22));
+  transition:
+    transform 380ms var(--ease-spring),
+    filter 380ms var(--ease-spring);
 }
 @media (prefers-reduced-motion: reduce) {
-  .slot {
+  .book {
+    animation: none;
     transition: none;
   }
 }
@@ -1719,43 +1751,53 @@ input[type='range']::-moz-range-thumb {
     transform: translateY(22px);
   }
 }
+.book:hover,
+.book:focus-visible,
+.book.on {
+  /* pulled a little way off the shelf */
+  transform: translateY(-14px);
+  filter: drop-shadow(0 14px 26px rgba(20, 14, 8, 0.3));
+  outline: none;
+}
+.book:active {
+  transform: translateY(-6px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .book:hover,
+  .book:focus-visible,
+  .book.on,
+  .book:active {
+    transform: none;
+    filter: drop-shadow(0 2px 5px rgba(20, 14, 8, 0.22));
+  }
+}
 
-.spine {
-  position: relative;
-  width: 100%;
+/* The 3D object itself — the only element the fan (`--ry`) ever touches.
+   Every face below is a child of this, positioned in its local 3D space,
+   so rotating it turns the whole book at once rather than each face
+   independently. */
+.body {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  transform: rotateY(var(--ry, 0deg));
+}
+
+/* ── the spine face — everything the flat wall used to be ──────────── */
+
+.face.spine {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   padding: 13px 2px 11px;
   border-radius: 1px 3px 3px 1px;
+  backface-visibility: hidden;
   box-shadow:
     inset -3px 0 6px rgba(0, 0, 0, 0.22),
     inset 1px 0 0 rgba(255, 255, 255, 0.14),
     0 2px 5px rgba(20, 14, 8, 0.22);
-  transition:
-    transform 380ms var(--ease-spring),
-    box-shadow 380ms var(--ease-spring),
-    height 520ms var(--ease-spring),
-    background 520ms var(--ease-out);
-}
-@media (prefers-reduced-motion: reduce) {
-  .spine {
-    transition: none;
-  }
-}
-.spine:hover,
-.spine:focus-visible,
-.spine.on {
-  /* pulled a little way off the shelf */
-  transform: translateY(-14px);
-  box-shadow:
-    inset -3px 0 6px rgba(0, 0, 0, 0.22),
-    inset 1px 0 0 rgba(255, 255, 255, 0.18),
-    0 14px 26px rgba(20, 14, 8, 0.3);
-  outline: none;
-}
-.spine:active {
-  transform: translateY(-6px);
 }
 
 /* the raised bands of a stitched binding */
@@ -1921,6 +1963,91 @@ input[type='range']::-moz-range-thumb {
   border-radius: var(--r-full);
   background: currentColor;
   box-shadow: 0 0 0 2.5px rgba(255, 255, 255, 0.14);
+}
+
+/* ── the cover face ──────────────────────────────────────────────────
+   Turned to face the room at rotateY(90deg) off the spine's right edge.
+   Its width — the book's "depth" once rotated — comes from the cover's
+   own aspect ratio in SpineWall.tsx, clamped so a very square or very
+   tall cover still reads as a plausible paperback rather than a domino
+   or a plank. */
+.cover {
+  position: absolute;
+  top: 0;
+  left: 100%;
+  height: 100%;
+  transform-origin: left center;
+  transform: rotateY(90deg);
+  backface-visibility: hidden;
+  overflow: hidden;
+  border-radius: 0 2px 2px 0;
+  box-shadow: inset 5px 0 9px -7px rgba(0, 0, 0, 0.55);
+}
+.cover img,
+.cover-fallback {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* ── the fore-edge ─────────────────────────────────────────────────
+   Ours, not the reference's — see SHELF-3D.md §6. The reference draws
+   only a cover face, so a book turned the other way shows nothing at all;
+   its neighbour just happens to hide the gap. This is the page block seen
+   edge-on: cream, with a fine repeating gradient standing in for individual
+   leaves, and a lit inset at the head where the block catches the light. */
+.fore {
+  position: absolute;
+  top: 0;
+  right: 100%;
+  height: 100%;
+  transform-origin: right center;
+  transform: rotateY(-90deg);
+  backface-visibility: hidden;
+  border-radius: 2px 0 0 2px;
+  background:
+    repeating-linear-gradient(
+      180deg,
+      rgba(60, 42, 18, 0.09) 0,
+      rgba(60, 42, 18, 0.09) 1px,
+      transparent 1px,
+      transparent 3px
+    ),
+    linear-gradient(180deg, #f5eeda, #e7d8b4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+}
+[data-theme='ink'] .fore {
+  background:
+    repeating-linear-gradient(
+      180deg,
+      rgba(0, 0, 0, 0.32) 0,
+      rgba(0, 0, 0, 0.32) 1px,
+      transparent 1px,
+      transparent 3px
+    ),
+    linear-gradient(180deg, #2a2620, #1b1815);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* ── the top edge ──────────────────────────────────────────────────
+   Foreshortened almost flat by the 78° tilt, so it reads as little more
+   than a warm highlight along the top of the row — which is exactly what
+   the paper block of a real shelf looks like from a few feet back. Fixed
+   at 5px regardless of a spine's own width: it is the compressed *top* of
+   the book, not a face with its own proportions. */
+.head {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 5px;
+  transform-origin: center bottom;
+  transform: rotateX(78deg);
+  background: linear-gradient(180deg, #f0e7d1, #d8c8a0);
+}
+[data-theme='ink'] .head {
+  background: linear-gradient(180deg, #2d2923, #1a1613);
 }
 
 /* ── what the world knows about a book ─────────────────────────────

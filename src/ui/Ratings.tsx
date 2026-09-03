@@ -17,7 +17,7 @@ import { useDarkTheme } from './theme';
 import { useRatings, rateableBooks, type Rateable } from '../store/ratings';
 import { useLibrary } from '../store/library';
 import { useDevice } from '../store/device';
-import { useEditions, type EditionSubject } from '../store/editions';
+import { useEditionCovers, useEditions, type EditionSubject } from '../store/editions';
 import { useOwnCovers } from '../store/ownCovers';
 import type { TroubleKind } from '../meta/editions';
 import { useSettings } from '../store/settings';
@@ -90,6 +90,7 @@ export function Ratings() {
   const trouble = useEditions((s) => s.trouble);
   const fill = useEditions((s) => s.fill);
   const refill = useEditions((s) => s.refill);
+  const coverUrls = useEditionCovers(byKey);
 
   /* What each rating's book knows about itself, over and above the rating.
      The publisher and the language come from the EPUB when there is one —
@@ -290,6 +291,7 @@ export function Ratings() {
               ratings={wall}
               dark={dark}
               extras={extras}
+              coverUrls={coverUrls}
               activeId={editing?.id}
               onOpen={(r) => setEditing(r)}
             />
