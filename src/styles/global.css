@@ -2050,6 +2050,92 @@ input[type='range']::-moz-range-thumb {
   background: linear-gradient(180deg, #2d2923, #1a1613);
 }
 
+/* ── the editorial top ───────────────────────────────────────────────
+   SHELF-3D.md §7. Replaces the old "N books rated" heading: the eyebrow
+   and the count line are set in Space Mono, and the headline is not a
+   count at all — it's tasteProfile()'s own tagline, the same sentence the
+   panels further down are built from, because "a fair judge who rewards
+   prose" says more about the shelf than a number does. The count line is
+   still there, just demoted to a mono aside underneath, where it can also
+   say "N matching volumes" once a mood chip narrows the wall. */
+.shelf-top {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--s4);
+  margin-bottom: var(--s5);
+  flex-wrap: wrap;
+}
+.mono {
+  font-family: var(--font-mono);
+}
+.eyebrow.mono {
+  letter-spacing: 0.16em;
+}
+.shelf-headline {
+  font-family: var(--font-display);
+  margin-top: 8px;
+  max-width: 30em;
+}
+.shelf-count {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-top: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The moods as a filter rather than a sort: picking one narrows the wall
+   below without reordering it, so it gets its own row instead of crowding
+   into .shelf-controls, which only ever changes order. Muted until active;
+   an active chip takes the mood's own colour and the same foil-stamped
+   ink `moodInk()` uses for the score on a dark spine, so whichever cloth
+   colour it is, the label stays readable. `All` and `Favourites` aren't
+   moods, so they get their own active treatment rather than falling back
+   on a `--chip` that was never set. */
+.mood-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 20px;
+}
+.mood-chips button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: var(--r-full);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  transition: background-color 160ms, color 160ms, border-color 160ms,
+    transform 160ms var(--ease-spring);
+}
+.mood-chips button:active {
+  transform: scale(0.96);
+}
+.mood-chips button.on {
+  border-color: transparent;
+  background: var(--chip);
+  color: var(--chip-ink);
+}
+.mood-chips button.all.on {
+  background: var(--ink);
+  color: var(--surface);
+}
+.mood-chips button.fav.on {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
 /* ── what the world knows about a book ─────────────────────────────
    The cover, the printing and the opening of the Wikipedia article, under
    the title in the rating sheet. Deliberately quiet: it sits next to the
@@ -2119,18 +2205,6 @@ input[type='range']::-moz-range-thumb {
   color: inherit;
   text-decoration: underline;
   text-underline-offset: 2px;
-}
-
-/* the generated sentence about the reader — set like a pull quote,
-   because it is the one place the app says something rather than
-   reporting something */
-.taste-line {
-  font-family: var(--font-read);
-  font-size: clamp(17px, 2.2vw, 22px);
-  line-height: 1.42;
-  color: var(--ink-2);
-  max-width: 34em;
-  margin: -8px 0 26px;
 }
 
 /* ── rating editor ────────────────────────────────────────────── */
