@@ -204,6 +204,8 @@ export interface TasteProfile {
   worst: RatingRecord | null;
   /** rated in the last 365 days */
   thisYear: number;
+  /** rated so far this calendar month, local time */
+  thisMonth: number;
   /** one sentence describing the reader, generated from the above */
   tagline: string;
 }
@@ -233,6 +235,7 @@ export function tasteProfile(ratings: RatingRecord[]): TasteProfile {
     best: null,
     worst: null,
     thisYear: 0,
+    thisMonth: 0,
     tagline: 'Rate a book and your taste starts taking shape.',
   };
   if (!ratings.length) return empty;
@@ -280,6 +283,12 @@ export function tasteProfile(ratings: RatingRecord[]): TasteProfile {
     (a, b) => b.overall - a.overall || b.ratedAt - a.ratedAt
   );
   const yearAgo = Date.now() - 365 * 86_400_000;
+  /* Calendar month, not a rolling 30 days — the same local-midnight
+     convention `dayTotal()` in stats.ts uses for "today", extended to
+     "this month" so the count line agrees with what a reader means by
+     it rather than with a fixed window that drifts across month ends. */
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
 
   const profile: TasteProfile = {
     count: ratings.length,
@@ -295,6 +304,7 @@ export function tasteProfile(ratings: RatingRecord[]): TasteProfile {
     best: byScore[0] ?? null,
     worst: byScore.length > 1 ? byScore[byScore.length - 1] : null,
     thisYear: ratings.filter((r) => r.ratedAt >= yearAgo).length,
+    thisMonth: ratings.filter((r) => r.ratedAt >= monthStart).length,
     tagline: '',
   };
   profile.tagline = tagline(profile);

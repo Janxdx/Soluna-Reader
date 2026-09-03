@@ -1,0 +1,78 @@
+/* The shelf's three bundled faces.
+ *
+ * Everywhere else in the app, "type" means the reader's own text and the
+ * system UI stack — see tokens.css and DESIGN.md §2, both still true. This
+ * file is only for the shelf tab's editorial layer: a display face for the
+ * headline and the spine titles, and a mono face for the eyebrow, the
+ * counts and the number stamped at a spine's foot.
+ *
+ * Subset to Latin + Latin-Ext, woff2 only, ~99 KB total. Relative url()s so
+ * Vite emits these into dist/assets/ like any other asset — which is what
+ * the sw-assets plugin in vite.config.ts globs to build the precache list,
+ * so bundling them costs no change to the service worker. That is also the
+ * whole reason to bundle rather than link: DESIGN.md's "no web fonts" rule
+ * was never about typefaces, it was about nothing being fetched at runtime
+ * — a font requested from Google at first paint is offline-hostile in
+ * exactly the way a cached local one is not.
+ *
+ * font-display: swap, and every @font-face has a system fallback behind it
+ * in the --font-* stacks below, so a session that opens before these have
+ * finished installing into the SW cache still reads fine.
+ */
+
+@font-face {
+  font-family: 'Cormorant Garamond';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/cormorant-garamond-400.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0100-024F, U+0250-02AF, U+1E00-1EFF, U+2000-206F,
+    U+20A0-20CF, U+2113, U+2122, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Cormorant Garamond';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('./fonts/cormorant-garamond-600.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0100-024F, U+0250-02AF, U+1E00-1EFF, U+2000-206F,
+    U+20A0-20CF, U+2113, U+2122, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Karla';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/karla-400.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0100-024F, U+0250-02AF, U+1E00-1EFF, U+2000-206F,
+    U+20A0-20CF, U+2113, U+2122, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Karla';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./fonts/karla-500.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0100-024F, U+0250-02AF, U+1E00-1EFF, U+2000-206F,
+    U+20A0-20CF, U+2113, U+2122, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Karla';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('./fonts/karla-700.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0100-024F, U+0250-02AF, U+1E00-1EFF, U+2000-206F,
+    U+20A0-20CF, U+2113, U+2122, U+2C60-2C7F, U+A720-A7FF;
+}
+
+@font-face {
+  font-family: 'Space Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('./fonts/space-mono-400.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0100-024F, U+0250-02AF, U+1E00-1EFF, U+2000-206F,
+    U+20A0-20CF, U+2113, U+2122, U+2C60-2C7F, U+A720-A7FF;
+}

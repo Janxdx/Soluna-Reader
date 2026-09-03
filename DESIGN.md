@@ -33,7 +33,9 @@ Accent is a warm amber — used for the pacer highlight, progress arcs, and noth
 
 They are muted on purpose — cloth, not highlighter pens — because a wall of them has to sit calmly next to warm paper.
 
-**Type** — reading text in a system serif stack (`Iowan Old Style` / `Palatino` / Georgia), UI in the system sans. No web fonts: the app must work fully offline and load instantly.
+**Type** — reading text in a system serif stack (`Iowan Old Style` / `Palatino` / Georgia), UI in the system sans. The rule was never "no fonts", it's "nothing fetched at runtime" — the shelf's editorial layer (§4) bundles three bookish faces of its own, subset and shipped in the PWA, not loaded from a CDN, so offline and instant-load both still hold.
+
+**The shelf's own faces** — Cormorant Garamond (display, for the headline and a spine's vertical title), Karla (its segmented controls and mood chips), and Space Mono (the eyebrow, the count line, and the score stamped at a spine's foot) — Latin + Latin-Ext, woff2 only, ~99 KB together. Nowhere else in the app: everywhere but the shelf still reads in the system stacks above.
 
 **Texture** — a barely-there film grain over backgrounds, a soft page-edge shadow at the gutter, and generous margins that scale with viewport. On a 12.9" iPad the text column caps at ~34em so line length stays readable.
 
@@ -92,13 +94,17 @@ One number is the verdict; five more are the reasons (prose, pacing, characters,
 
 A rating is its own record, not a column on a book. It carries the title and author, so it survives the EPUB being deleted to free space and can be about a book only ever read on the e-reader. Both shelves feed the picker.
 
-The screen itself is a wall of standing spines, and it reads three properties without a legend because a real shelf already has them:
+The screen itself is a wall of real CSS 3D objects — spine, cover, fore-edge and top, four faces on one `preserve-3d` body — fanned per row around a shared vanishing point the way books actually sit angled on a shelf, rather than shown flat-on. It reads three properties without a legend because a real shelf already has them, each falling back a step at a time so a half-known book still looks like a book rather than a mismatch of styles:
 
-- **colour** — the mood
-- **height** — the score (a nought still stands at 40%; a book you hated is still a book you finished)
-- **thickness** — the length of the book, mapped logarithmically and clamped, so a novella is not a hairline and an omnibus is not a wall of its own
+- **colour** — the cover's own bound colour where a cover was found; failing that, a matched publisher's livery (Reclam yellow, the Penguin tri-band, edition suhrkamp — real conventions, drawn in CSS at any thickness); failing that, the mood you rated it in. A livery beats the cover, not the other way round: it's what the spine *is*, not an inference about it.
+- **height** — the object's own real size, from the catalogue or a matched livery's known trim, where either is known; otherwise a height guessed from the book's length with a small jitter hashed from its title, so an unlooked-up shelf is ragged rather than a fence of identical spines. The score no longer sets height — see below.
+- **thickness** — real page count where known, else the word count a rating already carries, mapped logarithmically and clamped.
 
-Sort by rating, recency, mood, title or length. Underneath: your score distribution with your average marked on it — almost everyone discovers a spike at 8 with nothing below 6 — a radar of what you reward across every rating, and the mood mix as one ribbon of cloth.
+The score itself is the number stamped at the foot of the spine — you have to walk up and read it, the way you would on a real book — rather than the shelf's height, which now belongs to the object's own size.
+
+Above the wall: a Space Mono eyebrow, a Cormorant Garamond headline that is the reader's own generated tagline rather than a book count, and a mono count line underneath it. Mood chips filter the wall to one cloth colour at a time (or to favourites) without re-sorting it; sort by rating, recency, mood, title or length separately. Hovering a spine — or holding one, on a touch device — raises a peek card with the title, author, printing and the first line of what's known about the book, without opening the rating sheet. Underneath the wall: your score distribution with your average marked on it — almost everyone discovers a spike at 8 with nothing below 6 — a radar of what you reward across every rating, and the mood mix as one ribbon of cloth.
+
+A setting, "Look up covers online" (on by default), gates whether the shelf asks outside catalogues for a cover and a printing at all — real spines are not data anyone publishes, so a cover is a best-effort catalogue match, paced and cached, never required for a book to stand on the shelf.
 
 **The taste card** — the whole shelf as one shareable image: the generated sentence about you, the average, the spines in miniature, the curve, the colours, and the book you loved most. Authored as a string of SVG and used twice, rendered inline and rasterised into a PNG, so the saved image cannot drift from the preview. Saved through the share sheet where there is one.
 

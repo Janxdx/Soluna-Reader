@@ -17,7 +17,7 @@ import { useDarkTheme } from './theme';
 import { useRatings, rateableBooks, type Rateable } from '../store/ratings';
 import { useLibrary } from '../store/library';
 import { useDevice } from '../store/device';
-import { useEditions, type EditionSubject } from '../store/editions';
+import { useEditionCovers, useEditions, type EditionSubject } from '../store/editions';
 import { useOwnCovers } from '../store/ownCovers';
 import type { TroubleKind } from '../meta/editions';
 import { useSettings } from '../store/settings';
@@ -27,9 +27,11 @@ import {
   MOODS,
   SORTS,
   moodColor,
+  moodInk,
   moodOf,
   sortRatings,
   tasteProfile,
+  type MoodKey,
   type RatingRecord,
   type SortKey,
 } from '../engine/rating';
@@ -64,6 +66,10 @@ export function Ratings() {
   const dark = useDarkTheme();
 
   const [sort, setSort] = useState<SortKey>('rating');
+  /* A filter on the wall, not a sort — see the chips below. null is
+     "All"; 'favourites' is a second, independent axis from mood, since
+     a book can be any mood and also be a favourite. */
+  const [moodFilter, setMoodFilter] = useState<MoodKey | 'favourites' | null>(null);
   const [picking, setPicking] = useState(false);
   const [editing, setEditing] = useState<RatingRecord | null>(null);
   const [rating, setRating] = useState<Rateable | null>(null);
@@ -76,19 +82,30 @@ export function Ratings() {
 
   const profile = useMemo(() => tasteProfile(ratings), [ratings]);
   const wall = useMemo(() => sortRatings(ratings, sort), [ratings, sort]);
+  const filtered = useMemo(() => {
+    if (!moodFilter) return wall;
+    if (moodFilter === 'favourites') return wall.filter((r) => r.favourite);
+    return wall.filter((r) => r.mood === moodFilter);
+  }, [wall, moodFilter]);
+  const hasFavourites = useMemo(() => ratings.some((r) => r.favourite), [ratings]);
+  const countLine = moodFilter
+    ? `${filtered.length} matching ${filtered.length === 1 ? 'volume' : 'volumes'}`
+    : `${ratings.length} ${ratings.length === 1 ? 'volume' : 'volumes'} \u00b7 ${profile.thisMonth} this month`;
   const candidates = useMemo(() => (picking ? rateableBooks() : []), [picking]);
 
-  /* ── the realistic shelf ──────────────────────────────────────────
-     Which mode the wall is in is a setting rather than local state: it is
-     a way of looking at your reading, not a filter, and having it reset
-     every time the tab is left would make it feel like a toy. */
-  const shelfMode = useSettings((s) => s.shelfMode);
+  /* ── covers, from the outside ────────────────────────────────────
+     Whether the shelf may ask outside catalogues for a cover is a setting
+     rather than local state, for the same reason it always was: consent,
+     not a filter, and resetting it on every visit would make it feel like
+     a toy. See store/settings.ts. */
+  const lookupCoversOnline = useSettings((s) => s.lookupCoversOnline);
   const setSetting = useSettings((s) => s.set);
   const byKey = useEditions((s) => s.byKey);
   const filling = useEditions((s) => s.filling);
   const trouble = useEditions((s) => s.trouble);
   const fill = useEditions((s) => s.fill);
   const refill = useEditions((s) => s.refill);
+  const coverUrls = useEditionCovers(byKey);
 
   /* What each rating's book knows about itself, over and above the rating.
      The publisher and the language come from the EPUB when there is one —
@@ -133,10 +150,10 @@ export function Ratings() {
      still waiting on a lookup, so this can't flash the own cover and then
      the catalogue's a moment later. Reading `db.covers` and running the
      palette extractor is local and instant, so unlike the catalogue fill
-     this doesn't need pacing; it is still gated on `shelfMode` so a book
-     never spends a canvas pass for a shelf nobody switched to. */
+     this doesn't need pacing; it is still gated on `lookupCoversOnline` so a
+     book never spends a canvas pass when the setting is off. */
   useEffect(() => {
-    if (shelfMode !== 'shelf') return;
+    if (!lookupCoversOnline) return;
     for (const subject of subjects.values()) {
       if (!subject.bookId) continue;
       const row = byKey[editionKey(subject.title, subject.author)];
@@ -144,7 +161,7 @@ export function Ratings() {
         void ensureOwnCover(subject.bookId);
       }
     }
-  }, [shelfMode, subjects, byKey, ownCoverById, ensureOwnCover]);
+  }, [lookupCoversOnline, subjects, byKey, ownCoverById, ensureOwnCover]);
 
   const extras = useMemo((): Record<string, SpineExtras> => {
     const out: Record<string, SpineExtras> = {};
@@ -179,9 +196,9 @@ export function Ratings() {
      nobody opened — and the run is paced at one a second, so it is not
      free even when it is idle. */
   useEffect(() => {
-    if (shelfMode !== 'shelf' || !ratings.length) return;
+    if (!lookupCoversOnline || !ratings.length) return;
     void fill([...subjects.values()]);
-  }, [shelfMode, subjects, ratings.length, fill]);
+  }, [lookupCoversOnline, subjects, ratings.length, fill]);
 
   const closeSheets = () => {
     setEditing(null);
@@ -191,34 +208,87 @@ export function Ratings() {
   return (
     <div className="scroller">
       <div className="wrap">
-        <div className="lib-head">
-          <div>
-            <div className="eyebrow">The shelf</div>
-            <h1 className="display" style={{ marginTop: 6 }}>
-              {ratings.length === 0
-                ? 'Nothing rated yet'
-                : `${ratings.length} ${ratings.length === 1 ? 'book' : 'books'} rated`}
-            </h1>
-          </div>
-          <button className="btn primary" onClick={() => setPicking(true)}>
-            <IconPlus size={17} /> Rate a book
-          </button>
-        </div>
-
         {ratings.length === 0 ? (
-          <div className="empty">
-            <p style={{ fontFamily: 'var(--font-read)', fontSize: 20, color: 'var(--ink-2)' }}>
-              An empty shelf
-            </p>
-            <p style={{ fontSize: 13, marginTop: 8, maxWidth: 400, marginInline: 'auto' }}>
-              Give a book a score, five reasons and a colour. It comes back as a
-              spine — taller when you liked it, thicker when it was long — and
-              the shelf slowly becomes a picture of your taste.
-            </p>
-          </div>
+          <>
+            <div className="lib-head">
+              <div>
+                <div className="eyebrow">The shelf</div>
+                <h1 className="display" style={{ marginTop: 6 }}>
+                  Nothing rated yet
+                </h1>
+              </div>
+              <button className="btn primary" onClick={() => setPicking(true)}>
+                <IconPlus size={17} /> Rate a book
+              </button>
+            </div>
+            <div className="empty">
+              <p style={{ fontFamily: 'var(--font-read)', fontSize: 20, color: 'var(--ink-2)' }}>
+                An empty shelf
+              </p>
+              <p style={{ fontSize: 13, marginTop: 8, maxWidth: 400, marginInline: 'auto' }}>
+                Give a book a score, five reasons and a colour. It comes back as a
+                spine — taller when you liked it, thicker when it was long — and
+                the shelf slowly becomes a picture of your taste.
+              </p>
+            </div>
+          </>
         ) : (
           <>
-            <p className="taste-line">{profile.tagline}</p>
+            {/* Eyebrow, headline, count — SHELF-3D.md §7. The headline is
+                tasteProfile()'s own tagline rather than a book count: it was
+                already computed for the panels below, and "a fair judge who
+                rewards prose" says more than "97 books rated" does. The count
+                moves down into its own mono line, which is also where a mood
+                filter narrows it to "N matching volumes". */}
+            <div className="shelf-top">
+              <div>
+                <div className="eyebrow mono">A personal shelf</div>
+                <h1 className="display shelf-headline">{profile.tagline}</h1>
+                <p className="shelf-count mono">{countLine}</p>
+              </div>
+              <button className="btn primary" onClick={() => setPicking(true)}>
+                <IconPlus size={17} /> Rate a book
+              </button>
+            </div>
+
+            {/* A filter, not a sort — narrows the wall below without
+                reordering it, which is why it gets its own row rather than
+                folding into .shelf-controls. Each mood only appears once it
+                has been used at least once; an unrated mood would be a chip
+                that always does nothing. */}
+            {(profile.moods.length > 0 || hasFavourites) && (
+              <div className="mood-chips">
+                <button
+                  className={moodFilter === null ? 'all on' : 'all'}
+                  onClick={() => setMoodFilter(null)}
+                >
+                  All
+                </button>
+                {profile.moods.map(({ mood }) => {
+                  const m = moodOf(mood);
+                  return (
+                    <button
+                      key={mood}
+                      className={moodFilter === mood ? 'on' : ''}
+                      style={
+                        { '--chip': moodColor(m, dark), '--chip-ink': moodInk(m, dark) } as React.CSSProperties
+                      }
+                      onClick={() => setMoodFilter(mood)}
+                    >
+                      {mood}
+                    </button>
+                  );
+                })}
+                {hasFavourites && (
+                  <button
+                    className={moodFilter === 'favourites' ? 'fav on' : 'fav'}
+                    onClick={() => setMoodFilter('favourites')}
+                  >
+                    <IconStar size={11} solid /> Favourites
+                  </button>
+                )}
+              </div>
+            )}
 
             <div className="shelf-controls">
               <div className="segment">
@@ -233,24 +303,26 @@ export function Ratings() {
                 ))}
               </div>
 
-              {/* Two readings of the same shelf, not a display preference.
-                  See the note at the top of engine/spine.ts: the realistic
-                  one gives height and colour back to the object and hands
-                  the score down to the stamp at the foot. */}
+              {/* Not a display mode any more — see the note at the top of
+                  engine/spine.ts, the shelf draws one way now. This is
+                  consent: switching it off stops the shelf asking Google
+                  Books, Open Library and Wikipedia about your books, and
+                  every book not yet looked up falls back to the mood it
+                  was rated in rather than going unlabelled. */}
               <div className="segment">
                 <button
-                  className={shelfMode === 'data' ? 'on' : ''}
-                  onClick={() => setSetting('shelfMode', 'data')}
-                  title="Colour is the mood, height is the score"
+                  className={lookupCoversOnline ? 'on' : ''}
+                  onClick={() => setSetting('lookupCoversOnline', true)}
+                  title="Ask outside catalogues for covers and printings"
                 >
-                  Data
+                  Covers online
                 </button>
                 <button
-                  className={shelfMode === 'shelf' ? 'on' : ''}
-                  onClick={() => setSetting('shelfMode', 'shelf')}
-                  title="The books as they actually look"
+                  className={!lookupCoversOnline ? 'on' : ''}
+                  onClick={() => setSetting('lookupCoversOnline', false)}
+                  title="Draw every book from its rating alone"
                 >
-                  Shelf
+                  Off
                 </button>
               </div>
 
@@ -260,7 +332,7 @@ export function Ratings() {
                   round trip to our own Worker and nothing to any
                   catalogue. It is the answer to a wrong cover, and to a
                   fix that shipped and did not seem to arrive. */}
-              {shelfMode === 'shelf' && !filling && (
+              {lookupCoversOnline && !filling && (
                 <button
                   className="linky muted"
                   onClick={() => void refill([...subjects.values()])}
@@ -271,12 +343,12 @@ export function Ratings() {
               )}
             </div>
 
-            {shelfMode === 'shelf' && (filling || trouble) && (
+            {lookupCoversOnline && (filling || trouble) && (
               <p className="muted" style={{ fontSize: 12, marginBottom: 12 }}>
-                {/* The realistic shelf degrades to the ordinary one when a
-                    lookup fails, which is right — and which also makes
-                    every possible failure look identical from here: you
-                    press Shelf and nothing happens. So say which one. */}
+                {/* A lookup failure degrades to the mood fallback, which is
+                    right — and which also makes every possible failure
+                    look identical from here: nothing seems to happen. So
+                    say which one. */}
                 {trouble
                   ? (trouble.detail ?? TROUBLE[trouble.kind])
                   : 'Finding covers — the shelf fills in as they arrive.'}
@@ -284,10 +356,10 @@ export function Ratings() {
             )}
 
             <SpineWall
-              ratings={wall}
+              ratings={filtered}
               dark={dark}
-              mode={shelfMode}
               extras={extras}
+              coverUrls={coverUrls}
               activeId={editing?.id}
               onOpen={(r) => setEditing(r)}
             />

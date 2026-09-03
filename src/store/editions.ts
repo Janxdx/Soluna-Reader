@@ -7,10 +7,11 @@
  * enough to matter is one you have to scroll anyway.
  */
 
+import { useEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
 import { db, type EditionRecord } from '../db';
 import { editionKey } from '../engine/edition';
-import { ensureEdition, fillShelf, lookupTrouble, paused, type LookupTrouble } from '../meta/editions';
+import { editionCoverBlob, ensureEdition, fillShelf, lookupTrouble, paused, type LookupTrouble } from '../meta/editions';
 
 /** A book as any of the three shelves can describe it. */
 export interface EditionSubject {
@@ -123,4 +124,57 @@ export const useEditions = create<EditionState>((set, get) => ({
 async function refresh(set: (partial: Partial<EditionState>) => void): Promise<void> {
   const rows = await db.editions.toArray();
   set({ byKey: Object.fromEntries(rows.map((r) => [r.key, r])) });
+}
+
+/* ── cover object URLs, for the shelf ─────────────────────────────────
+ *
+ * `EditionCard` makes and revokes one object URL per open, which is fine
+ * for a sheet showing one book. The shelf shows every book that has a
+ * cover at once — a hundred of them on a full library — and needs the
+ * same URLs to survive re-renders (a fresh URL per render would flash
+ * every cover on every keystroke) without leaking the ones that scroll
+ * out of `byKey` or the ones left over when the tab unmounts.
+ *
+ * A ref holds the live map so the revoke-on-change logic below never
+ * revokes a URL still in use just because a render happened to run
+ * before its owner re-read state; `force` only exists to ask React to
+ * hand the ref's current contents to the caller once it has settled.
+ */
+export function useEditionCovers(byKey: Record<string, EditionRecord>): Record<string, string> {
+  const cache = useRef<Map<string, string>>(new Map());
+  const [, force] = useState(0);
+
+  useEffect(() => {
+    let changed = false;
+    const seen = new Set<string>();
+    for (const [key, row] of Object.entries(byKey)) {
+      const blob = editionCoverBlob(row);
+      if (!blob) continue;
+      seen.add(key);
+      if (!cache.current.has(key)) {
+        cache.current.set(key, URL.createObjectURL(blob));
+        changed = true;
+      }
+    }
+    for (const key of Array.from(cache.current.keys())) {
+      if (!seen.has(key)) {
+        URL.revokeObjectURL(cache.current.get(key)!);
+        cache.current.delete(key);
+        changed = true;
+      }
+    }
+    if (changed) force((n) => n + 1);
+  }, [byKey]);
+
+  /* On the way out — a session that never revisits the shelf tab again
+     should not hold every cover it ever drew in memory. */
+  useEffect(
+    () => () => {
+      for (const url of cache.current.values()) URL.revokeObjectURL(url);
+      cache.current.clear();
+    },
+    []
+  );
+
+  return Object.fromEntries(cache.current);
 }
