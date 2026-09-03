@@ -10,6 +10,18 @@
   --font-read-sans: -apple-system, 'SF Pro Text', system-ui, sans-serif;
   --font-num: ui-rounded, -apple-system, 'SF Pro Rounded', system-ui, sans-serif;
 
+  /* The shelf's three bundled faces (src/styles/fonts.css) — scoped to the
+     ratings tab's editorial layer, not a site-wide type change. A display
+     serif for the headline and a spine's title; a mono for the eyebrow, the
+     counts, and the score stamped at a spine's foot; Karla for the shelf's
+     own UI (filter chips, the peek card) where system sans would sit next
+     to hand-set type and read as an afterthought. Each stack falls back to
+     the system fonts above, so a session mid-install of the SW cache still
+     reads fine. */
+  --font-display: 'Cormorant Garamond', var(--font-read);
+  --font-mono: 'Space Mono', var(--font-num);
+  --font-shelf-ui: 'Karla', var(--font-ui);
+
   /* spacing scale */
   --s1: 4px;
   --s2: 8px;

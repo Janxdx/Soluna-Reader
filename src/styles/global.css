@@ -1,4 +1,5 @@
 @import './tokens.css';
+@import './fonts.css';
 
 /* ─── reset ─────────────────────────────────────────────────────── */
 *,
@@ -1838,6 +1839,7 @@ input[type='range']::-moz-range-thumb {
    is set the same way in every country. */
 .spine .imprint {
   flex: none;
+  font-family: var(--font-mono);
   font-size: 6.5px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -1867,7 +1869,10 @@ input[type='range']::-moz-range-thumb {
 .spine .title {
   writing-mode: vertical-rl;
   text-orientation: mixed;
-  font-family: var(--font-read);
+  /* Cormorant Garamond, not the reading stack — a spine's title is set
+     type, the way a real binding stamps it, not running prose. */
+  font-family: var(--font-display);
+  font-weight: 600;
   font-size: 13px;
   line-height: 1;
   letter-spacing: 0.005em;
@@ -1898,7 +1903,7 @@ input[type='range']::-moz-range-thumb {
 
 .spine .score {
   flex: none;
-  font-family: var(--font-num);
+  font-family: var(--font-mono);
   font-size: 11px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
