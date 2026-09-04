@@ -126,6 +126,18 @@ export interface SpineLook {
   height: string;
   /** the face of the spine, already a gradient with its lit and shadowed edges */
   background: string;
+  /** the flat colour the spine is bound in — the same one `background`
+      is built from. Drawn on its own where the cover's own image is laid
+      over it: the image's left edge, tinted this colour, is what a spine
+      cut from a cover looks like. */
+  ground: string;
+  /** how far this book leans against its neighbour, in degrees. Most
+      books stand straight; a few don't, and that is what stops a row
+      reading as a fence. Hashed from the title, so a book keeps its lean. */
+  lean: number;
+  /** how far it stands proud of the row, in px — a book pushed in a
+      little, or not quite pushed back. Same hash, different bits. */
+  push: number;
   /** what the title and score are stamped in */
   ink: string;
   /** bands, rules and the publisher's mark */
@@ -179,6 +191,25 @@ function titleHash(s: string): number {
   let h = 0;
   for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
   return h >>> 0;
+}
+
+/* The irregularity of a real shelf: nobody pushes every book all the way
+   back, and one in three leans on the one beside it. Both come off the
+   same title hash as the height jitter and for the same reason — a shelf
+   that re-shuffled its own posture on every launch would read as broken,
+   not alive. Two thirds of books stand dead straight; the rest lean up to
+   ±2.4°, which is about where a lean stops being a lean and starts
+   being a fall. */
+const LEAN_MAX = 2.4;
+const PUSH_MAX = 8;
+export function stance(title: string): { lean: number; push: number } {
+  const h = titleHash(`${title}·stance`);
+  const a = (h % 1000) / 1000;
+  const b = ((h >>> 10) % 1000) / 1000;
+  const leans = a < 0.34;
+  const lean = leans ? +((a / 0.34 - 0.5) * 2 * LEAN_MAX).toFixed(2) : 0;
+  const push = +((b - 0.5) * 2 * PUSH_MAX).toFixed(1);
+  return { lean, push };
 }
 
 function jitterHeight(rating: RatingRecord): string {
@@ -239,6 +270,8 @@ export function spineLook(input: LookInput): SpineLook {
       width: realMetrics({ words: rating.words }).width,
       height: jitterHeight(rating),
       background: bind(face, moodColor(mood, dark, 7), moodColor(mood, dark, -9)),
+      ground: face,
+      ...stance(rating.title),
       ink: moodInk(mood, dark),
       accent: moodInk(mood, dark),
       pattern: 'plain',
@@ -284,6 +317,8 @@ export function spineLook(input: LookInput): SpineLook {
     width: metrics.width,
     height,
     background: bind(ground, shade(ground, 0.16), shade(ground, -0.22)),
+    ground,
+    ...stance(rating.title),
     ink,
     accent,
     pattern: livery?.pattern ?? 'plain',

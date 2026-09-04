@@ -163,8 +163,9 @@ export interface PassageIndexRecord {
 }
 
 /* ── editions ──────────────────────────────────────────────────────
-   What a book looks like in the world: publisher, page count, cover image,
-   the colours of that cover, and the opening of its Wikipedia article.
+   What a book looks like in the world: publisher, page count, and the
+   year. No cover image lives here any more — that is always the EPUB's
+   own, read straight from `covers` below.
 
    Derived public data, so it sits beside `passages` rather than beside the
    reading tables — outside sync and outside tombstones. Not because it is
@@ -331,11 +332,13 @@ class SolunaDB extends Dexie {
       passages: 'bookId, usedAt',
     });
 
-    /* v6 adds the edition cache — covers, publishers and Wikipedia teasers,
-       keyed by title-and-author rather than by book id. Second table in
-       this database holding no user data, and outside sync for the same
-       reason as `passages`: see the note on EditionRecord. Nothing else
-       changes shape, so there is no upgrade body. */
+    /* v6 adds the edition cache — publishers, page counts and (at the
+       time) covers, keyed by title-and-author rather than by book id.
+       Second table in this database holding no user data, and outside
+       sync for the same reason as `passages`: see the note on
+       EditionRecord. Nothing else changes shape, so there is no upgrade
+       body. Covers stopped being fetched or stored here from
+       EXTRACT_VERSION 4 on; see meta/editions.ts. */
     this.version(6).stores({
       books: 'id, addedAt, finishedAt, updatedAt',
       files: 'bookId',

@@ -26,6 +26,56 @@ Sections that are now history rather than pending work:
 - **Supabase removed; D1 schema now deploys itself** (below).
 - **renamed from Lumen to Soluna** (below).
 
+## The 3D shelf: why it rendered as a heap, and the spine cut from the cover
+
+Three separate bugs made the shelf a heap of overlapping cream slabs with
+books hanging from the top rail, and none of them was in the 3D maths.
+All three are the same class: **a grouping property anywhere between
+`.shelf-row` and the faces forces that element's used `transform-style`
+to flat**, and a flat book is depth-sorted against its neighbours by DOM
+order instead of by distance. Found by rendering the real `global.css`
+against synthetic covers in headless Chromium (`tests/` has nothing for
+this — a stylesheet cannot be typechecked into being 3D).
+
+- `.tome`'s entry animation used `animation-fill-mode: both`. The
+  keyframes animate opacity, and a forward fill keeps an opacity
+  animation *applied* forever — at opacity 1, which is why it looked
+  harmless. An applied opacity animation is a grouping property. Now
+  `backwards`.
+- `.shelf-row` carried `contain: layout paint` and `content-visibility:
+  auto` (which implies `contain: paint`), both grouping. They live on a
+  wrapper `.shelf-band` now, padded 140px sideways and the padding taken
+  back with a negative margin, because paint containment clips to the
+  padding box and a cover turned out at ±30° is a hundred pixels wide.
+- `.slot` never aligned its book to the foot, so every book hung from the
+  top of the slot. `display: flex; align-items: flex-end`.
+
+The `filter: drop-shadow` on `.tome` (2026-09-03) was the first instance
+of the same rule. The rule, in one line: never put filter, opacity < 1,
+overflow, mask, clip-path, isolation, mix-blend-mode, contain: paint or an
+*applied* opacity animation on any element that is, or is an ancestor of,
+one declaring `preserve-3d`. A leaf face (`.face.spine` has `overflow:
+hidden` now) is fine — nothing 3D lives below it.
+
+**The spine is cut from the cover** (`.spine.cut` in `SpineWall.tsx`):
+the EPUB's own cover at the spine's full height and natural width,
+anchored top-left so the face shows the cover's left edge, under a wash
+of the ground colour at ~0.6 and a paper grain. This is exactly what the
+reference (`carollia-library.lovable.app`) does, read out of its DOM.
+The blurred `edgeTexture` strip stays as the fallback for a spine with a
+palette but no cover URL yet. `Ratings.tsx` now merges the cover's
+palette *under* a catalogue row's facts instead of choosing one or the
+other, so a book the catalogue knows the page count of still gets its own
+colour when no livery applies.
+
+**Posture** — `stance()` in `engine/spine.ts`: a third of books lean up
+to ±2.4° about their foot, all of them stand up to ±8px proud of or behind
+the row, hashed from the title like the height jitter so the shelf keeps
+its posture between launches. `SLOT_GAP` (2px) in `engine/shelf.ts` is
+counted into the row width; `.shelf-row { gap: 2px }` must agree.
+
+No schema change, so `npm run db:local` is not needed.
+
 ## How much longer, and how much today
 
 Two small additions, both to numbers that already existed somewhere and

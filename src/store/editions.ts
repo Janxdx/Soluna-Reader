@@ -44,10 +44,11 @@ interface EditionState {
   refill(subjects: EditionSubject[]): Promise<void>;
 }
 
-/* The language to ask Wikipedia in when the book does not say. The browser's
-   is the best guess available and a much better one than a hard-coded
-   'en' — somebody reading on a German iPad is overwhelmingly likely to have
-   read the German edition of a book they logged by hand. */
+/* The language to ask the catalogues for an edition in, when the book does
+   not say. The browser's is the best guess available and a much better one
+   than a hard-coded 'en' — somebody reading on a German iPad is
+   overwhelmingly likely to have read the German edition of a book they
+   logged by hand. */
 const defaultLang = (): string =>
   (typeof navigator !== 'undefined' && navigator.language) || 'en';
 

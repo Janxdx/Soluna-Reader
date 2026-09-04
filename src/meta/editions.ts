@@ -18,7 +18,6 @@
 
 import { db, trimEditionCache, type EditionRecord } from '../db';
 import { editionKey, editionSlug, type EditionData } from '../engine/edition';
-import { extractEdgeStrip, extractPalette } from './palette';
 
 /**
  * Which generation of this code wrote a cached row.
@@ -40,8 +39,15 @@ import { extractEdgeStrip, extractPalette } from './palette';
  *   3  adds edgeTexture — a blurred strip off the cover's own edge that a
  *      spine with no livery is now drawn in, rather than the flat ground
  *      `groundFrom` reduces the palette to; see extractEdgeStrip
+ *   4  stops downloading a catalogue's own cover image at all — the EPUB's
+ *      own cover, already on the device, is the standard image and the
+ *      standard source of palette and edgeTexture now (see
+ *      `meta/ownCover.ts` and `store/ownCovers.ts`). A row below this
+ *      version may still carry a downloaded `cover`/`coverType` and a
+ *      palette derived from it; re-fetching drops that dead weight and
+ *      leaves only the catalogue facts this file still asks for.
  */
-export const EXTRACT_VERSION = 3;
+export const EXTRACT_VERSION = 4;
 
 const stale = (row: EditionRecord): boolean => (row.v ?? 1) < EXTRACT_VERSION;
 
@@ -174,22 +180,6 @@ async function fetchEdition(
   }
 }
 
-async function fetchCover(coverPath: string): Promise<Blob | null> {
-  /* The path comes back as `editions/<slug>.cover`; the route wants the
-     slug alone. Derived rather than stored twice so there is one spelling
-     of an object name in the system. */
-  const slug = coverPath.replace(/^editions\//, '').replace(/\.cover$/, '');
-  try {
-    const res = await fetch(`/api/editions/cover/${encodeURIComponent(slug)}`, {
-      credentials: 'same-origin',
-    });
-    if (!res.ok) return null;
-    return await res.blob();
-  } catch {
-    return null;
-  }
-}
-
 /** True while the server has told us to slow down. Callers use it to stop a
     shelf-wide run early rather than making sixty requests that all 429. */
 export const paused = (): boolean => Date.now() < pausedUntil;
@@ -254,44 +244,19 @@ async function load(
   const data = await fetchEdition(key, title, author, lang);
   if (!data) return null;
 
-  let cover: ArrayBuffer | undefined;
-  let coverType: string | undefined;
-  let palette: string[] | undefined;
-  let edgeTexture: string | undefined;
-
-  if (data.coverPath) {
-    const blob = await fetchCover(data.coverPath);
-    if (blob) {
-      /* Both read from the Blob while we still hold it, before it is
-         drained to bytes. Doing it later would mean rebuilding a Blob from
-         the stored ArrayBuffer on every launch — the extraction is cheap
-         but it is not free, and the answer never changes. */
-      const swatches = await extractPalette(blob);
-      if (swatches.length) palette = swatches.map((s) => s.hex);
-      edgeTexture = (await extractEdgeStrip(blob)) ?? undefined;
-
-      /* Drained to bytes rather than stored as the Blob: IndexedDB refuses
-         a blob whose backing is still held elsewhere and takes the
-         surrounding transaction down with it. Same reason as CoverRecord. */
-      cover = await blob.arrayBuffer();
-      coverType = blob.type || 'image/jpeg';
-    }
-  }
-
-  const derived: Partial<EditionData> = {
-    ...(palette ? { palette } : {}),
-    ...(edgeTexture ? { edgeTexture } : {}),
-  };
-
+  /* No image is downloaded here any more, and none is stored — the EPUB's
+     own cover, already on the device, is the standard image and the
+     standard source of palette and edgeTexture now; see
+     `meta/ownCover.ts`. What this still fetches is the catalogue facts
+     alone: publisher, page count, year, ISBN. */
   const now = Date.now();
   const record: EditionRecord = {
     key,
     v: EXTRACT_VERSION,
-    data: Object.keys(derived).length ? { ...data, ...derived } : data,
-    ...(cover ? { cover, coverType } : {}),
+    data,
     fetchedAt: now,
     usedAt: now,
-    size: (cover?.byteLength ?? 0) + 600,
+    size: 600,
   };
 
   try {
