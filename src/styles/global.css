@@ -1683,18 +1683,43 @@ input[type='range']::-moz-range-thumb {
 
 /* One row, one vanishing point. `perspective-origin` sits a little below
    centre (62% down) so the shelf reads as seen slightly from above, the
-   way a shelf at chest height actually is. `content-visibility` skips
-   layout and paint for rows scrolled off-screen — the shelf's own answer
-   to a library long enough to need it. */
+   way a shelf at chest height actually is.
+
+   Two elements per row. `.shelf-band` is the one that keeps a long library
+   cheap: `content-visibility` skips layout and paint for rows scrolled
+   off-screen. `.shelf-row` inside it is the 3D space, and it must be a
+   separate element — `contain: paint` (which `content-visibility: auto`
+   implies) is a grouping property, and a grouping property forces the
+   element's *used* `transform-style` to flat, whatever the declared value
+   says. With both on one element every book in the row was flattened to
+   its own 2D layer, and overlap between neighbours was decided by DOM
+   order instead of depth: one spine appearing to swallow the book beside
+   it. Same class of bug as the `filter` on `.tome` below, one level up. */
+.shelf-band {
+  contain: layout paint;
+  content-visibility: auto;
+  contain-intrinsic-size: auto calc(var(--slot-h) + 32px);
+  /* Paint containment clips to the padding box, so the box is padded out
+     and the padding taken back with a negative margin: room for a book
+     pulled off the shelf, its shadow, and — at either end of the row — a
+     cover or fore-edge turned out past the last spine, which at ±30° is
+     a good hundred pixels wide. */
+  padding: 20px 140px 12px;
+  margin: -20px -140px -12px;
+}
 .shelf-row {
   position: relative;
   display: flex;
   align-items: flex-end;
+  gap: 2px; /* SLOT_GAP in engine/shelf.ts — the two must agree */
   perspective: 1400px;
   perspective-origin: 50% 62%;
-  contain: layout paint;
-  content-visibility: auto;
-  contain-intrinsic-size: auto var(--slot-h);
+  /* Every book in a row shares ONE 3D space, so an overhanging cover or
+     fore-edge is sorted against its neighbour by real depth. Nothing
+     below this may carry a grouping property (filter, opacity < 1,
+     overflow, contain: paint, mask, clip-path…) on the path down to the
+     faces — see the notes on .shelf-band and .tome. */
+  transform-style: preserve-3d;
 }
 
 /* The board: almost nothing, on purpose — a hairline and the shadow it
@@ -1721,6 +1746,12 @@ input[type='range']::-moz-range-thumb {
 .slot {
   height: var(--slot-h);
   flex: none;
+  /* The book stands on the board, so it sits at the *foot* of its slot —
+     the slot is the full shelf height and the book is a percentage of
+     it. Without this every book hung from the top rail instead, the
+     tallest one reaching the board and the rest dangling above it. */
+  display: flex;
+  align-items: flex-end;
   transform-style: preserve-3d;
 }
 
@@ -1729,15 +1760,31 @@ input[type='range']::-moz-range-thumb {
      platform chrome; only what's specific to a 3D object goes here */
   display: block;
   width: 100%;
-  height: 100%;
   position: relative;
   cursor: pointer;
   transform-style: preserve-3d;
-  animation: shelve 620ms var(--ease-out) both;
-  filter: drop-shadow(0 2px 5px rgba(20, 14, 8, 0.22));
+  /* `backwards`, never `both`. The entry animates opacity, and an element
+     with an opacity animation still applied to it — which a forward fill
+     keeps applied forever, at opacity 1 — is a grouping element: its used
+     transform-style is flat, so every book was flattened to its own 2D
+     layer once it had finished arriving, and overlap between neighbours
+     was settled by DOM order instead of depth. That is what drew a
+     fore-edge across the four spines beside it. The same rule as the
+     `filter` note below; this one is easier to miss because the value it
+     holds at rest is the harmless one. */
+  animation: shelve 620ms var(--ease-out) backwards;
+  /* Deliberately not `filter: drop-shadow(...)` — filter forces the used
+     value of transform-style to `flat` on the element carrying it, which
+     is this one. That would flatten .tome-body and every face under it
+     into a single 2D plane instead of the intended 3D object: a real bug
+     seen only on browsers that implement the spec rule (Safari does), not
+     in a dev tool that doesn't. The same shadow is painted instead as the
+     last layer of .face.spine's own box-shadow, below, driven by this
+     variable so hover/focus can swap it without touching `filter`. */
+  --outer-shadow: 0 2px 5px rgba(20, 14, 8, 0.22);
   transition:
     transform 380ms var(--ease-spring),
-    filter 380ms var(--ease-spring);
+    box-shadow 380ms var(--ease-spring);
 }
 @media (prefers-reduced-motion: reduce) {
   .tome {
@@ -1756,7 +1803,7 @@ input[type='range']::-moz-range-thumb {
 .tome.on {
   /* pulled a little way off the shelf */
   transform: translateY(-14px);
-  filter: drop-shadow(0 14px 26px rgba(20, 14, 8, 0.3));
+  --outer-shadow: 0 14px 26px rgba(20, 14, 8, 0.3);
   outline: none;
 }
 .tome:active {
@@ -1768,7 +1815,7 @@ input[type='range']::-moz-range-thumb {
   .tome.on,
   .tome:active {
     transform: none;
-    filter: drop-shadow(0 2px 5px rgba(20, 14, 8, 0.22));
+    --outer-shadow: 0 2px 5px rgba(20, 14, 8, 0.22);
   }
 }
 
@@ -1780,7 +1827,12 @@ input[type='range']::-moz-range-thumb {
   position: absolute;
   inset: 0;
   transform-style: preserve-3d;
-  transform: rotateY(var(--ry, 0deg));
+  transform-origin: 50% 100%;
+  /* the fan first, then the book's own posture: a lean turns about its
+     foot, where a real book pivots, and a push sets it a little proud of
+     or behind the row — both from engine/spine.ts:stance, both hashed
+     from the title so the shelf keeps its posture between launches */
+  transform: rotateY(var(--ry, 0deg)) rotateZ(var(--lean, 0deg)) translateZ(var(--push, 0px));
 }
 
 /* ── the spine face — everything the flat wall used to be ──────────── */
@@ -1794,10 +1846,67 @@ input[type='range']::-moz-range-thumb {
   padding: 13px 2px 11px;
   border-radius: 1px 3px 3px 1px;
   backface-visibility: hidden;
+  /* A leaf face — nothing 3D below it — so clipping is safe here, and
+     needed: the cover laid across it is wider than the spine. */
+  overflow: hidden;
   box-shadow:
     inset -3px 0 6px rgba(0, 0, 0, 0.22),
     inset 1px 0 0 rgba(255, 255, 255, 0.14),
-    0 2px 5px rgba(20, 14, 8, 0.22);
+    var(--outer-shadow, 0 2px 5px rgba(20, 14, 8, 0.22));
+}
+
+/* ── a spine cut from the cover ────────────────────────────────────
+   Three layers under the lettering, in this order: the cover at the
+   spine's full height and its own width, anchored top-left, so the face
+   shows the cover's own left edge; a wash of the ground colour over it,
+   so the edge reads as the same binding whatever it happens to show and
+   the title stays legible on top; and a fine horizontal grain, which is
+   what makes the strip read as paper and board rather than a slice of a
+   JPEG. The lettering, bands and score are `position: relative` so they
+   paint above all three. */
+.spine .spine-art {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: auto;
+  max-width: none;
+  opacity: 0.72;
+  pointer-events: none;
+}
+.spine .spine-tint {
+  position: absolute;
+  inset: 0;
+  opacity: 0.58;
+  pointer-events: none;
+}
+.spine .spine-grain {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.55;
+  background-image:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.035) 0 2px, rgba(255, 255, 255, 0.02) 2px 3px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.36) 0%, rgba(0, 0, 0, 0.1) 20%, rgba(255, 255, 255, 0.13) 46%, rgba(0, 0, 0, 0.12) 78%, rgba(0, 0, 0, 0.4) 100%),
+    linear-gradient(180deg, rgba(255, 246, 224, 0.22), rgba(255, 246, 224, 0) 14%);
+}
+.spine.cut .band {
+  opacity: 0.5;
+}
+.spine .title,
+.spine .imprint,
+.spine .score,
+.spine .band,
+.spine .gilt {
+  z-index: 1;
+}
+.spine .title,
+.spine .imprint,
+.spine .score {
+  position: relative;
+}
+.spine.cut .title {
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.35);
 }
 
 /* the raised bands of a stitched binding */
@@ -1900,7 +2009,7 @@ input[type='range']::-moz-range-thumb {
   box-shadow:
     inset -2px 0 5px rgba(0, 0, 0, 0.18),
     inset 1px 0 0 rgba(255, 255, 255, 0.2),
-    0 2px 5px rgba(20, 14, 8, 0.24);
+    var(--outer-shadow, 0 2px 5px rgba(20, 14, 8, 0.24));
 }
 /* The bands are stitching on a bound book and have no business on a
    glued paperback. */
@@ -2181,16 +2290,9 @@ input[type='range']::-moz-range-thumb {
   border-radius: 2px;
   flex: none;
 }
-.peek-teaser {
-  font-family: var(--font-read);
-  font-size: 13px;
-  line-height: 1.45;
-  color: var(--ink-2);
-  margin-top: 8px;
-}
 
 /* ── what the world knows about a book ─────────────────────────────
-   The cover, the printing and the opening of the Wikipedia article, under
+   The cover — the EPUB's own where there is one — and the printing, under
    the title in the rating sheet. Deliberately quiet: it sits next to the
    part of the page that is entirely the reader's own opinion, and it must
    not compete with it. */
@@ -2239,25 +2341,6 @@ input[type='range']::-moz-range-thumb {
   font-size: 11.5px;
   color: var(--ink-3);
   margin-top: 3px;
-}
-
-.edition-extract {
-  font-family: var(--font-read);
-  font-size: 14px;
-  line-height: 1.5;
-  color: var(--ink-2);
-  margin-top: 8px;
-}
-
-.edition-source {
-  font-size: 11px;
-  color: var(--ink-3);
-  margin-top: 7px;
-}
-.edition-source a {
-  color: inherit;
-  text-decoration: underline;
-  text-underline-offset: 2px;
 }
 
 /* ── rating editor ────────────────────────────────────────────── */

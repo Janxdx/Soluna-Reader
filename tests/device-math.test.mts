@@ -1,6 +1,7 @@
 import {
   pageToPercent, percentToPage, percentToLocus, locusToPercent,
   bodyPages, pagesToWords, wordsPerPage, pagesPerHour, remaining, findMatch,
+  clampGeometry,
 } from '../src/engine/device.ts';
 
 let fails = 0;
@@ -99,5 +100,39 @@ eq('ambiguous title, no match', findMatch({ title: 'Poems', author: '' }, [
 eq('compound surname not fooled', findMatch({ title: 'A Wizard of Earthsea', author: 'John Guin' }, lib), 'y');
 eq('smith vs hammersmith', findMatch({ title: 'Book One', author: 'Smith' }, [{ id: 'z', title: 'Book One', author: 'Jane Hammersmith' }]), null);
 eq('missing author on one side still links', findMatch({ title: 'The Dispossessed', author: '' }, lib), 'x');
+/* ── the three numbers, kept consistent ───────────────────────────── */
+
+eq('a sane triple is left alone',
+  clampGeometry({ pages: 300, startPage: 11, currentPage: 150 }),
+  { pages: 300, startPage: 11, currentPage: 150 });
+
+eq('a current page past the end is pulled back to the end',
+  clampGeometry({ pages: 300, startPage: 1, currentPage: 900 }),
+  { pages: 300, startPage: 1, currentPage: 300 });
+
+/* Left alone, this was the one that broke everything downstream: it
+   collapses bodyPages to 1, which makes one reader page worth the entire
+   novel and every session's word count absurd. */
+eq('a body starting past the end is pulled back to the end',
+  clampGeometry({ pages: 400, startPage: 900, currentPage: 200 }),
+  { pages: 400, startPage: 400, currentPage: 200 });
+eq('and then a page is a page again', bodyPages(clampGeometry({ pages: 400, startPage: 900, currentPage: 200 })), 1);
+
+eq('shrinking the book brings the current page with it',
+  clampGeometry({ pages: 200, startPage: 11, currentPage: 350 }),
+  { pages: 200, startPage: 11, currentPage: 200 });
+
+eq('zero pages is not a book', clampGeometry({ pages: 0, startPage: 1, currentPage: 0 }).pages, 1);
+eq('nor a negative one', clampGeometry({ pages: -5, startPage: 1, currentPage: 0 }).pages, 1);
+eq('page zero means not started, and survives',
+  clampGeometry({ pages: 300, startPage: 17, currentPage: 0 }).currentPage, 0);
+eq('a negative current page is not started either',
+  clampGeometry({ pages: 300, startPage: 1, currentPage: -4 }).currentPage, 0);
+eq('fractions round', clampGeometry({ pages: 299.6, startPage: 10.4, currentPage: 12.5 }),
+  { pages: 300, startPage: 10, currentPage: 13 });
+eq('an empty box is not a number',
+  clampGeometry({ pages: NaN, startPage: NaN, currentPage: NaN }),
+  { pages: 1, startPage: 1, currentPage: 0 });
+
 console.log(fails === 0 ? '\nALL PASS' : `\n${fails} FAILURES`);
 process.exit(fails ? 1 : 0);

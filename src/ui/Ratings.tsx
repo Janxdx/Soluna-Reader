@@ -18,7 +18,7 @@ import { useRatings, rateableBooks, type Rateable } from '../store/ratings';
 import { useLibrary } from '../store/library';
 import { useDevice } from '../store/device';
 import { useEditionCovers, useEditions, type EditionSubject } from '../store/editions';
-import { useOwnCovers } from '../store/ownCovers';
+import { useOwnCovers, useOwnCoverUrls } from '../store/ownCovers';
 import type { TroubleKind } from '../meta/editions';
 import { useSettings } from '../store/settings';
 import { editionKey, type EditionData } from '../engine/edition';
@@ -38,12 +38,12 @@ import {
 import { relativeDate } from '../engine/stats';
 
 /* Each of these is a different thing to go and do, which is the whole
-   reason they are not one "couldn't load covers". `no-endpoint` is the one
-   that bit in practice: `vite dev` has no Worker behind it and answers
+   reason they are not one "couldn't load printings". `no-endpoint` is the
+   one that bit in practice: `vite dev` has no Worker behind it and answers
    /api/lookup with the app's own index.html, so the shelf is talking to
    itself. `npm run worker` is the local setup that has an API. */
 const TROUBLE: Record<TroubleKind, string> = {
-  'signed-out': 'Sign in on the account tab to look covers up.',
+  'signed-out': 'Sign in on the account tab to look printings up.',
   'no-endpoint':
     'No lookup service answered. On a dev server use `npm run worker`; on the live app, deploy again.',
   offline: 'Offline — the shelf will fill in next time you have a connection.',
@@ -93,11 +93,13 @@ export function Ratings() {
     : `${ratings.length} ${ratings.length === 1 ? 'volume' : 'volumes'} \u00b7 ${profile.thisMonth} this month`;
   const candidates = useMemo(() => (picking ? rateableBooks() : []), [picking]);
 
-  /* ── covers, from the outside ────────────────────────────────────
-     Whether the shelf may ask outside catalogues for a cover is a setting
-     rather than local state, for the same reason it always was: consent,
-     not a filter, and resetting it on every visit would make it feel like
-     a toy. See store/settings.ts. */
+  /* ── printing details, from the outside ───────────────────────────
+     The cover is always the EPUB's own now — see the effect below — so
+     this setting is only about whether the shelf may ask outside
+     catalogues for a book's publisher, page count and year. It is a
+     setting rather than local state for the same reason it always was:
+     consent, not a filter, and resetting it on every visit would make it
+     feel like a toy. See store/settings.ts. */
   const lookupCoversOnline = useSettings((s) => s.lookupCoversOnline);
   const setSetting = useSettings((s) => s.set);
   const byKey = useEditions((s) => s.byKey);
@@ -140,28 +142,39 @@ export function Ratings() {
     return out;
   }, [ratings]);
 
-  /* The own-cover fallback. `byId` from `useOwnCovers` so the wall re-renders
-     once an extraction lands. */
+  /* The own-cover palette and texture. `byId` from `useOwnCovers` so the
+     wall re-renders once an extraction lands. */
   const ownCoverById = useOwnCovers((s) => s.byId);
   const ensureOwnCover = useOwnCovers((s) => s.ensure);
 
-  /* Only for a book the catalogue has definitively said nothing about — a
-     row exists (the lookup ran) and `knowsAnything` is false — never for one
-     still waiting on a lookup, so this can't flash the own cover and then
-     the catalogue's a moment later. Reading `db.covers` and running the
-     palette extractor is local and instant, so unlike the catalogue fill
-     this doesn't need pacing; it is still gated on `lookupCoversOnline` so a
-     book never spends a canvas pass when the setting is off. */
+  /* The EPUB's own cover *image*, for the front face — independent of the
+     palette/texture above and not gated on any setting: reading bytes
+     already on the device costs no network and needs no consent. Every
+     book with a resolved bookId is a candidate; SpineWall draws it as the
+     standard image and only falls back to an online cover from an older
+     cached row when this one hasn't got there yet. */
+  const ownBookIds = useMemo(
+    () => Array.from(subjects.values(), (s) => s.bookId).filter((id): id is string => Boolean(id)),
+    [subjects]
+  );
+  const ownCoverUrls = useOwnCoverUrls(ownBookIds);
+
+  /* The standard source of a spine's colour and texture now, not a
+     fallback for a catalogue miss — a catalogue lookup no longer carries a
+     palette or an edge texture of its own (see EXTRACT_VERSION in
+     meta/editions.ts), so this runs for every book with a bookId,
+     regardless of `lookupCoversOnline` and regardless of whether a
+     catalogue row exists yet. It steps aside only once a catalogue match
+     has actually arrived and says something real — a livery is drawn from
+     the publisher, not a guess made from a thumbnail. Reading `db.covers`
+     and running the palette extractor is local and instant, so unlike the
+     catalogue fill this doesn't need pacing or consent. */
   useEffect(() => {
-    if (!lookupCoversOnline) return;
     for (const subject of subjects.values()) {
-      if (!subject.bookId) continue;
-      const row = byKey[editionKey(subject.title, subject.author)];
-      if (row && !knowsAnything(row.data) && !(subject.bookId in ownCoverById)) {
-        void ensureOwnCover(subject.bookId);
-      }
+      if (!subject.bookId || subject.bookId in ownCoverById) continue;
+      void ensureOwnCover(subject.bookId);
     }
-  }, [lookupCoversOnline, subjects, byKey, ownCoverById, ensureOwnCover]);
+  }, [subjects, ownCoverById, ensureOwnCover]);
 
   const extras = useMemo((): Record<string, SpineExtras> => {
     const out: Record<string, SpineExtras> = {};
@@ -169,32 +182,44 @@ export function Ratings() {
       const key = editionKey(subject.title, subject.author);
       const row = byKey[key];
       const ownArt = subject.bookId ? ownCoverById[subject.bookId] : undefined;
-      /* The book's own cover stands in only on a definitive miss — see the
-         effect above — and only when something of it actually survived
-         extraction. */
-      const fallback: EditionData | undefined =
-        row && !knowsAnything(row.data) && (ownArt?.palette?.length || ownArt?.texture)
-          ? {
-              key,
-              ...(ownArt.palette?.length ? { palette: ownArt.palette } : {}),
-              ...(ownArt.texture ? { edgeTexture: ownArt.texture } : {}),
-            }
-          : undefined;
-      const edition = fallback ?? row?.data;
+      /* The book's own cover is the standard source of colour and texture
+         — a catalogue row from EXTRACT_VERSION 4 on never carries either.
+         So the two are merged rather than one chosen: the catalogue's
+         facts (publisher, page count, trim height — the things a livery
+         and a real thickness come from) with the cover's own palette and
+         edge laid underneath, where the row has none of its own. A row
+         that knows nothing at all contributes nothing and the cover
+         stands alone; a book with neither keeps the mood colour. */
+      const art: Partial<EditionData> = {
+        ...(ownArt?.palette?.length ? { palette: ownArt.palette } : {}),
+        ...(ownArt?.texture ? { edgeTexture: ownArt.texture } : {}),
+      };
+      const hasArt = Boolean(art.palette || art.edgeTexture);
+      const known = row && knowsAnything(row.data) ? row.data : undefined;
+      const edition: EditionData | undefined = known
+        ? {
+            ...known,
+            ...(known.palette?.length ? {} : art.palette ? { palette: art.palette } : {}),
+            ...(known.edgeTexture ? {} : art.edgeTexture ? { edgeTexture: art.edgeTexture } : {}),
+          }
+        : hasArt
+          ? { key, ...art }
+          : row?.data;
       out[id] = {
         ...(edition ? { edition } : {}),
         ...(subject.publisher ? { publisher: subject.publisher } : {}),
         ...(subject.lang ? { language: subject.lang } : {}),
+        ...(subject.bookId ? { bookId: subject.bookId } : {}),
       };
     }
     return out;
   }, [subjects, byKey, ownCoverById]);
 
-  /* Only fetched once the realistic shelf has actually been asked for.
-     Looking every book up on the chance that somebody might switch would
-     be a few dozen requests to three other people's services for a screen
-     nobody opened — and the run is paced at one a second, so it is not
-     free even when it is idle. */
+  /* Only fetched once consent has actually been given. Looking every book
+     up on the chance that somebody might switch this on would be a few
+     dozen requests to two other people's services for a screen nobody
+     opened — and the run is paced at one a second, so it is not free even
+     when it is idle. */
   useEffect(() => {
     if (!lookupCoversOnline || !ratings.length) return;
     void fill([...subjects.values()]);
@@ -303,24 +328,25 @@ export function Ratings() {
                 ))}
               </div>
 
-              {/* Not a display mode any more — see the note at the top of
-                  engine/spine.ts, the shelf draws one way now. This is
-                  consent: switching it off stops the shelf asking Google
-                  Books, Open Library and Wikipedia about your books, and
-                  every book not yet looked up falls back to the mood it
-                  was rated in rather than going unlabelled. */}
+              {/* Consent, not a display mode: the cover itself is always the
+                  EPUB's own now (see the effect above), so what this
+                  switches is whether the shelf may ask Google Books and
+                  Open Library for a book's publisher, page count and
+                  year. Off leaves every spine drawn from the EPUB and the
+                  rating alone, which is a complete shelf on its own, not
+                  a degraded one. */}
               <div className="segment">
                 <button
                   className={lookupCoversOnline ? 'on' : ''}
                   onClick={() => setSetting('lookupCoversOnline', true)}
-                  title="Ask outside catalogues for covers and printings"
+                  title="Ask outside catalogues for publisher, page count and year"
                 >
-                  Covers online
+                  Catalogue info
                 </button>
                 <button
                   className={!lookupCoversOnline ? 'on' : ''}
                   onClick={() => setSetting('lookupCoversOnline', false)}
-                  title="Draw every book from its rating alone"
+                  title="Use only the EPUB and the rating"
                 >
                   Off
                 </button>
@@ -330,8 +356,9 @@ export function Ratings() {
                   nowhere else in this app: the table holds no user data,
                   and the server has every answer already, so this costs a
                   round trip to our own Worker and nothing to any
-                  catalogue. It is the answer to a wrong cover, and to a
-                  fix that shipped and did not seem to arrive. */}
+                  catalogue. It is the answer to a wrong publisher or
+                  printing, and to a fix that shipped and did not seem to
+                  arrive. */}
               {lookupCoversOnline && !filling && (
                 <button
                   className="linky muted"
@@ -351,7 +378,7 @@ export function Ratings() {
                     say which one. */}
                 {trouble
                   ? (trouble.detail ?? TROUBLE[trouble.kind])
-                  : 'Finding covers — the shelf fills in as they arrive.'}
+                  : 'Finding publishers and printings — the shelf fills in as they arrive.'}
               </p>
             )}
 
@@ -360,6 +387,7 @@ export function Ratings() {
               dark={dark}
               extras={extras}
               coverUrls={coverUrls}
+              ownCoverUrls={ownCoverUrls}
               activeId={editing?.id}
               onOpen={(r) => setEditing(r)}
             />

@@ -29,6 +29,7 @@ import {
   type DeviceSessionRecord,
   type ProgressRecord,
 } from '../db';
+import { bodyPages, pageToPercent } from '../engine/device';
 import type { Session } from '../engine/stats';
 import type { RatingRecord } from '../engine/rating';
 import { useLibrary } from '../store/library';
@@ -340,7 +341,27 @@ export async function merge(changes: Changes): Promise<void> {
       continue;
     }
     if (!local || local.updatedAt <= row.updated_at) {
-      await db.deviceBooks.put(rowToDeviceBook(row) as DeviceBookRecord);
+      const next = rowToDeviceBook(row) as DeviceBookRecord;
+
+      /* `currentLocus` — the exact spot a scan or a library pull stamped on
+         this card — has no column on the wire, and this is a `put`, which
+         replaces the record rather than patching it. So every sync used to
+         quietly destroy it and drop the card back to estimating its position
+         from the page number alone.
+
+         Keeping it is safe exactly when `recomputeBook` would still trust
+         it: while it agrees with the page the incoming row carries. A row
+         that moved the page somewhere else is describing a different place,
+         and a stale exact answer is worse than an honest estimate. */
+      if (local?.currentLocus) {
+        const tolerance = 1 / bodyPages(next) + 0.0005;
+        const agrees =
+          Math.abs(local.currentLocus.percent - pageToPercent(next, next.currentPage)) <=
+          tolerance;
+        if (agrees) next.currentLocus = local.currentLocus;
+      }
+
+      await db.deviceBooks.put(next);
     }
   }
 

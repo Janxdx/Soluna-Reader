@@ -37,17 +37,6 @@ interface Props {
   dark: boolean;
 }
 
-/* The teaser is a full paragraph; the card only has room for the subject
-   sentence, not a plot summary a fingertip's width above the fan. Splits
-   on the first sentence-ending punctuation followed by whitespace or the
-   end of the string, so a title containing a period ("Der Prozess (The
-   Trial)...") isn't cut early by it — there's no punctuation there for
-   this to match on in the first place. */
-function firstSentence(text: string): string {
-  const m = /^.*?[.!?](?=\s|$)/.exec(text.trim());
-  return m ? m[0] : text;
-}
-
 export function PeekCard({ anchor, rating, look, edition, publisher, dark }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   /* Off-screen and invisible until measured, rather than guessed and
@@ -81,7 +70,6 @@ export function PeekCard({ anchor, rating, look, edition, publisher, dark }: Pro
   const facts = [rating.author || null, edition?.year ? String(edition.year) : null, printer ?? null].filter(
     Boolean
   ) as string[];
-  const teaser = edition?.wiki?.extract ? firstSentence(edition.wiki.extract) : null;
 
   return createPortal(
     <div className="peek-card" ref={ref} style={style} aria-hidden="true">
@@ -91,7 +79,6 @@ export function PeekCard({ anchor, rating, look, edition, publisher, dark }: Pro
         <i style={{ background: moodColor(mood, dark) }} aria-hidden />
         {rating.overall}/10{mood ? ` · ${mood.label}` : ''}
       </p>
-      {teaser && <p className="peek-teaser">{teaser}</p>}
     </div>,
     document.body
   );

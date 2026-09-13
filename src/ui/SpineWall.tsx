@@ -44,6 +44,10 @@ export interface SpineExtras {
   edition?: EditionData;
   publisher?: string;
   language?: string;
+  /** the library or reader book this rating resolved to, if any — the key
+      into `db.covers` for the EPUB's own cover, the standard image on the
+      front face. See `ownCoverUrls` below. */
+  bookId?: string;
 }
 
 /* The same lit-down-the-left, shadowed-at-the-right sheen `bind()` paints
@@ -65,7 +69,11 @@ const TEXTURE_SHEEN_DARK =
     below purely so TypeScript sees one object shape instead of a union of
     two — inlining the conditional there made every other property on the
     style object suspect too. */
-function faceStyle(look: SpineLook, dark: boolean): React.CSSProperties {
+function faceStyle(look: SpineLook, dark: boolean, hasCover = false): React.CSSProperties {
+  /* With the cover itself laid over the face (see `.spine-art` below) the
+     ground is drawn flat and the image carries the detail; the blurred
+     edge strip was only ever a stand-in for exactly this. */
+  if (hasCover) return { background: look.ground };
   if (look.textureUrl) {
     return {
       backgroundImage: `${dark ? TEXTURE_SHEEN_DARK : TEXTURE_SHEEN}, url(${look.textureUrl})`,
@@ -151,15 +159,21 @@ interface Props {
   dark: boolean;
   /** by rating id — absent means "nothing known", which is a normal state */
   extras: Record<string, SpineExtras>;
-  /** by edition key — object URLs for whatever covers are cached; see
-      `useEditionCovers` in store/editions.ts */
+  /** by edition key — object URLs for a cover an older cached row still
+      carries from before covers were fetched online at all; see
+      `useEditionCovers` in store/editions.ts. Legacy only: nothing
+      populates this any more, and it never overrides the book's own
+      cover below. */
   coverUrls: Record<string, string>;
+  /** by book id — the EPUB's own cover, the standard image on the front
+      face; see `useOwnCoverUrls` in store/ownCovers.ts. */
+  ownCoverUrls: Record<string, string>;
   onOpen: (rating: RatingRecord) => void;
   /** highlighted while its sheet is open */
   activeId?: string | null;
 }
 
-export function SpineWall({ ratings, dark, extras, coverUrls, onOpen, activeId }: Props) {
+export function SpineWall({ ratings, dark, extras, coverUrls, ownCoverUrls, onOpen, activeId }: Props) {
   /* Recomputed only when the shelf or the theme changes — this runs over
      every spine and the wall re-renders on hover. `extras` is in the
      dependency list by identity, so the tab must hand over a new object
@@ -185,10 +199,15 @@ export function SpineWall({ ratings, dark, extras, coverUrls, onOpen, activeId }
      `Placed` — engine/shelf.ts trades in spine widths and positions, not
      in what a spine's *contents* are. */
   const meta = useMemo(() => {
-    const m = new Map<string, { rating: RatingRecord; editionKey?: string }>();
+    const m = new Map<string, { rating: RatingRecord; editionKey?: string; bookId?: string }>();
     for (const r of ratings) {
       const editionKey = extras[r.id]?.edition?.key;
-      m.set(r.id, { rating: r, ...(editionKey ? { editionKey } : {}) });
+      const bookId = extras[r.id]?.bookId;
+      m.set(r.id, {
+        rating: r,
+        ...(editionKey ? { editionKey } : {}),
+        ...(bookId ? { bookId } : {}),
+      });
     }
     return m;
   }, [ratings, extras]);
@@ -228,7 +247,28 @@ export function SpineWall({ ratings, dark, extras, coverUrls, onOpen, activeId }
   );
 
   const slotH = useSlotHeightPx();
-  const aspects = useCoverAspects(coverUrls);
+
+  /* Online cover wins when it's there; the EPUB's own cover — free, local,
+     and already on the device the moment a book is imported — stands in
+     whenever it isn't, rather than the flat livery/mood face falling back
+     alone. Keyed by rating id so both sources resolve through one map,
+     which is also what a re-render needs to stay stable: an object built
+     fresh here every render would defeat useCoverAspects' own probe cache
+     keyed by URL, not by identity, so that's fine either way, but a
+     single map is simpler for the row loop below to read. */
+  const effectiveCoverUrls = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const [id, m] of meta) {
+      /* The EPUB's own cover is the standard image now; a catalogue cover
+         only ever stands in for an older row cached from before covers
+         were fetched online at all, which is why it is checked second and
+         will keep going empty for every book looked up from here on. */
+      const url = (m.bookId && ownCoverUrls[m.bookId]) || (m.editionKey && coverUrls[m.editionKey]);
+      if (url) out[id] = url;
+    }
+    return out;
+  }, [meta, coverUrls, ownCoverUrls]);
+  const aspects = useCoverAspects(effectiveCoverUrls);
 
   /* Checked once, not per book: a mouse tracks in and out of a hundred
      spines, and a `matchMedia` read for each would be a hundred reads of
@@ -271,13 +311,22 @@ export function SpineWall({ ratings, dark, extras, coverUrls, onOpen, activeId }
   return (
     <div className="wall3d" ref={wallRef} role="list">
       {rows.map((row, ri) => (
-        <div className="shelf-row" key={ri} style={{ width: row.width }}>
+        /* Two elements per row on purpose. `.shelf-band` carries the
+           containment and `content-visibility` that keep a long library
+           cheap; `.shelf-row` inside it is the 3D space. They cannot be the
+           same element: `contain: paint` (which `content-visibility: auto`
+           implies) is a grouping property, and forces the element's used
+           `transform-style` to flat — every book in the row was being
+           flattened to a 2D layer, and their overlap resolved by DOM order
+           instead of depth. */
+        <div className="shelf-band" key={ri}>
+          <div className="shelf-row" style={{ width: row.width }}>
           {row.books.map(({ id, look, ry }) => {
             const m = meta.get(id);
             if (!m) return null;
             const i = entryIndex++;
-            const coverUrl = m.editionKey ? coverUrls[m.editionKey] : undefined;
-            const aspect = m.editionKey ? aspects[m.editionKey] : undefined;
+            const coverUrl = effectiveCoverUrls[id];
+            const aspect = aspects[id];
             return (
               <Spine
                 key={id}
@@ -299,6 +348,7 @@ export function SpineWall({ ratings, dark, extras, coverUrls, onOpen, activeId }
               />
             );
           })}
+          </div>
         </div>
       ))}
       {peek && peekedMeta && peekedLook && (
@@ -409,7 +459,18 @@ function Spine({
   };
 
   return (
-    <div className="slot" role="listitem" style={{ width: look.width, '--ry': `${ry}deg` } as React.CSSProperties}>
+    <div
+      className="slot"
+      role="listitem"
+      style={
+        {
+          width: look.width,
+          '--ry': `${ry}deg`,
+          '--lean': `${look.lean}deg`,
+          '--push': `${look.push}px`,
+        } as React.CSSProperties
+      }
+    >
       <button
         ref={btnRef}
         className={`tome${active ? ' on' : ''}`}
@@ -426,9 +487,25 @@ function Spine({
         <span className="tome-body">
           {/* the spine itself — everything the flat wall used to be */}
           <span
-            className={`face spine p-${look.pattern}${look.real ? ' real' : ''}`}
-            style={{ ...faceStyle(look, dark), color: look.ink, '--accent': look.accent } as React.CSSProperties}
+            className={`face spine p-${look.pattern}${look.real ? ' real' : ''}${coverUrl ? ' cut' : ''}`}
+            style={
+              { ...faceStyle(look, dark, Boolean(coverUrl)), color: look.ink, '--accent': look.accent } as React.CSSProperties
+            }
           >
+            {/* A spine cut from the cover: the image at the spine's full
+                height and its own width, anchored at the left, so the face
+                shows the cover's own left edge — the same paper, the same
+                ink — under a wash of the ground colour that keeps the
+                lettering readable whatever the edge happens to show. No
+                catalogue has a photograph of a spine; this is the nearest
+                thing to one that can be made from what an EPUB carries. */}
+            {coverUrl && (
+              <>
+                <img className="spine-art" src={coverUrl} alt="" loading="lazy" decoding="async" />
+                <span className="spine-tint" style={{ background: look.ground }} />
+                <span className="spine-grain" />
+              </>
+            )}
             <span className="band top" />
             <span className="band bottom" />
             {r.favourite && <span className="gilt" aria-hidden />}

@@ -31,8 +31,10 @@
 
    ─── what a lookup costs ────────────────────────────────────────────
 
-   Up to four outbound requests on a miss, to services that are free and
-   would rather we didn't. So: a miss is cached forever when it found
+   Up to two outbound requests on a miss — Open Library and Google, run
+   together — to services that are free and would rather we didn't. No
+   image is fetched here at all; a cover is always the EPUB's own, read
+   straight off the device. So: a miss is cached forever when it found
    something, for a fortnight when it didn't (a book missing from a
    catalogue today may be in it next month, but retrying on every render
    would be rude), every outbound call has a hard timeout, and the endpoint
@@ -54,16 +56,11 @@ import { HttpError } from './http';
 
 import {
   MATCH_FLOOR,
-  normalize,
-  normalizeAuthor,
-  normalizeTitle,
   scoreCandidate,
-  wordOverlap,
   type EditionData,
-  type WikiSummary,
 } from '../src/engine/edition';
 
-export type { EditionData, WikiSummary };
+export type { EditionData };
 
 /* Identifies us to the catalogues. Open Library asks for a name and a way
    to get in touch, and gives traffic that provides one a materially higher
@@ -189,12 +186,6 @@ async function fromOpenLibrary(want: Want): Promise<EditionData | null> {
   };
 }
 
-const olCoverUrl = (coverId: string): string =>
-  /* `default=false` matters: without it a missing cover is answered with a
-     placeholder image and a 200, so every book would get the same grey
-     rectangle and we would have no way to tell that from a real cover. */
-  `https://covers.openlibrary.org/b/id/${encodeURIComponent(coverId)}-L.jpg?default=false`;
-
 /* ── Google Books ──────────────────────────────────────────────────
    Second, and much the better of the two on German editions: it knows
    publishers, series and page counts for books Open Library has never heard
@@ -293,184 +284,12 @@ function parseHeightMm(raw?: string): number | undefined {
   return mm >= 80 && mm <= 400 ? Math.round(mm) : undefined;
 }
 
-function googleCoverUrl(volumeId: string): string {
-  /* zoom=1 is the 128 px thumbnail the API advertises; zoom=3 is the same
-     image at about 800 px and is what the Books web reader itself asks for.
-     `edge=curl` is the fake page-curl the thumbnail ships with, which looks
-     like damage once the image is used as a cover. */
-  return `https://books.google.com/books/content?id=${encodeURIComponent(volumeId)}&printsec=frontcover&img=1&zoom=3`;
-}
-
-/* ── Wikipedia ─────────────────────────────────────────────────────
-
-   This went through Wikidata first, on the reasoning that being a book is
-   a statement on the item (P31) and that sitelinks name the same book's
-   article in every language — so you could find the work, check it really
-   is a novel, and follow the link into the reader's language. Sound, and
-   it does not work, for a dull reason: `wbsearchentities` is a *prefix*
-   search over labels and aliases. The German article for Der Prozess is
-   titled "Der Process", so the query diverged at the eighth character and
-   matched nothing at all. Kafka is not an edge case here; German
-   orthography reformed in 1996 and half the canon has two spellings.
-
-   So: search the language Wikipedia itself, which is a full-text index and
-   forgiving of exactly that, then verify what came back. The verification
-   is the part that matters, because a title search alone will hand you the
-   1962 Orson Welles film, or a disambiguation page, as happily as the
-   novel.
-
-   Two checks do it. The author has to be named in the article's opening —
-   an article about a book always names its author in the first sentence.
-   And the one-line description, which the REST summary carries from
-   Wikidata, decides between the novel and the film adaptation that also
-   names Kafka in its first line. */
-
-interface WpSearchHit {
-  title?: string;
-}
-
-interface WpSummary {
-  title?: string;
-  description?: string;
-  extract?: string;
-  type?: string;
-  content_urls?: { desktop?: { page?: string } };
-}
-
-/* Words that mean "this article is about a written work", and words that
-   mean "this is the film of it". Both lists are matched against the
-   Wikidata description, which is short, structured and written to exactly
-   this purpose — "Roman von Franz Kafka", "1962 film by Orson Welles". */
-const WORK_WORDS = /\b(roman|novel|book|buch|erzahlung|novelle|werk|literary|literatur|kurzgeschichte|drama|theaterstuck|gedicht|poem|play|trilogie|trilogy|saga|memoir|sachbuch|essay)\b/;
-const NOT_WORK_WORDS = /\b(film|movie|opera|oper|serie|series|album|song|lied|videospiel|video game|musical|band|painting|gemalde)\b/;
-
-async function summaryFor(lang: string, title: string): Promise<WpSummary | null> {
-  return getJson<WpSummary>(
-    `https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`
-  );
-}
-
-/** Search one language Wikipedia and return the best verified summary. */
-async function wikipediaIn(lang: string, want: Want): Promise<WikiSummary | null> {
-  const search = await getJson<{ query?: { search?: WpSearchHit[] } }>(
-    `https://${lang}.wikipedia.org/w/api.php?${new URLSearchParams({
-      action: 'query',
-      list: 'search',
-      /* Title and author together. The author is what separates the novel
-         from the seventeen other things called Der Prozess, and a
-         full-text index weights both. */
-      srsearch: `${want.title} ${want.author}`.trim(),
-      srlimit: '5',
-      format: 'json',
-      origin: '*',
-    })}`
-  );
-
-  const hits = (search?.query?.search ?? [])
-    .map((h) => h.title)
-    .filter((t): t is string => Boolean(t));
-  if (!hits.length) return null;
-
-  /* The author's surname, which is the longest word in the name often
-     enough to be a decent guess and is what an opening sentence uses.
-     Empty when there is no author, in which case the check is skipped —
-     a book with no author on the shelf is rare and not worth refusing. */
-  const surname = normalizeAuthor(want.author)
-    .split(' ')
-    .sort((a, b) => b.length - a.length)[0];
-
-  let best: { summary: WpSummary; s: number } | null = null;
-
-  for (const title of hits.slice(0, 4)) {
-    const summary = await summaryFor(lang, title);
-    if (!summary?.extract || summary.type === 'disambiguation') continue;
-
-    const description = normalize(summary.description ?? '');
-    const opening = normalize(summary.extract.slice(0, 400));
-
-    /* An article about a book names its author in the first sentence. An
-       article that never mentions them is about something else, however
-       well the title matched. */
-    if (surname && !opening.includes(surname) && !description.includes(surname)) continue;
-
-    let s = wordOverlap(normalizeTitle(want.title), normalizeTitle(summary.title ?? ''));
-    if (WORK_WORDS.test(description)) s += 0.6;
-    /* The film of the book mentions the author too, and often matches the
-       title exactly. This is the check that keeps Orson Welles off the
-       rating sheet. */
-    if (NOT_WORK_WORDS.test(description)) s -= 0.8;
-
-    if (!best || s > best.s) best = { summary, s };
-  }
-
-  if (!best || best.s <= 0) return null;
-
-  const title = best.summary.title ?? hits[0];
-  return {
-    lang,
-    title,
-    /* Two or three sentences. The REST summary is already the lead
-       paragraph, but a lead paragraph on a famous novel runs to eight
-       lines, which is longer than anybody reads on a rating card. */
-    extract: trimSentences(best.summary.extract ?? '', 3),
-    url:
-      best.summary.content_urls?.desktop?.page ??
-      `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(title)}`,
-  };
-}
-
-async function fromWikipedia(want: Want): Promise<WikiSummary | null> {
-  const lang = want.lang.slice(0, 2).toLowerCase() || 'en';
-
-  const own = await wikipediaIn(lang, want);
-  if (own) return own;
-
-  /* English as a fallback, because an article the reader can read beats an
-     empty card — and the summary carries the language it is actually in,
-     so the sheet can say why it is not German. */
-  return lang === 'en' ? null : wikipediaIn('en', want);
-}
-
-function trimSentences(text: string, max: number): string {
-  const parts = text.split(/(?<=[.!?])\s+/);
-  const out = parts.slice(0, max).join(' ').trim();
-  return out.length > 480 ? `${out.slice(0, 477).trimEnd()}…` : out;
-}
-
 /* ── covers ────────────────────────────────────────────────────────
-   Fetched here, stored in R2, and served back to the client from our own
-   origin. Same-origin is not a detail: an <img> from covers.openlibrary.org
-   taints a canvas, and a tainted canvas cannot be read — which would mean
-   no colour palette, which is most of what the covers are *for*. */
-
-const MIN_COVER_BYTES = 3000;
-const MAX_COVER_BYTES = 4 * 1024 * 1024;
-
-async function storeCover(env: Env, slug: string, url: string): Promise<string | null> {
-  try {
-    const res = await fetch(url, {
-      headers: { 'user-agent': UA, accept: 'image/*' },
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-    if (!res.ok) return null;
-
-    const type = res.headers.get('content-type') ?? '';
-    if (!type.startsWith('image/')) return null;
-
-    const bytes = await res.arrayBuffer();
-    /* Both catalogues answer "no cover" with a tiny image rather than a
-       404 under some conditions — a 1×1 gif from Google, a 43-byte
-       placeholder from Open Library. Neither is worth a round trip to
-       discover on the client, and both look like a broken app on a shelf. */
-    if (bytes.byteLength < MIN_COVER_BYTES || bytes.byteLength > MAX_COVER_BYTES) return null;
-
-    const path = `editions/${slug}.cover`;
-    await env.BOOKS.put(path, bytes, { httpMetadata: { contentType: type } });
-    return path;
-  } catch {
-    return null;
-  }
-}
+   No longer fetched here at all. An edition's cover is now always the
+   EPUB's own — already on the device, already free — and the shelf draws
+   that directly; see `meta/ownCover.ts` and `store/ownCovers.ts` on the
+   client. What this file still asks the catalogues for is the printing
+   itself: publisher, page count, year, ISBN. */
 
 /* ── the cache ─────────────────────────────────────────────────────── */
 
@@ -526,7 +345,7 @@ async function readCache(env: Env, key: string): Promise<EditionData | null> {
      change, and re-asking would spend somebody else's quota to learn the
      same thing twice. A miss is worth retrying eventually, because a book
      absent from a catalogue this month may be in it next month. */
-  const empty = !data.source && !data.wiki;
+  const empty = !data.source;
   if (empty && Date.now() - row.fetched_at > MISS_TTL) return null;
 
   return data;
@@ -579,17 +398,12 @@ export async function lookupEdition(
      Google only as a fallback. They disagree about which books they know
      well, and the score is the whole point of having one. Run together
      because they are independent and a lookup already costs a second. */
-  const [ol, google, wiki] = await Promise.all([
-    fromOpenLibrary(want),
-    fromGoogle(env, want),
-    fromWikipedia(want),
-  ]);
+  const [ol, google] = await Promise.all([fromOpenLibrary(want), fromGoogle(env, want)]);
 
   const bestCatalogue =
     ol && google ? ((google.score ?? 0) >= (ol.score ?? 0) ? google : ol) : (google ?? ol);
 
   const data: EditionData = { ...(bestCatalogue ?? {}), key };
-  if (wiki) data.wiki = wiki;
 
   /* Page count and height are facts about a printing, and Google carries
      them far more often than Open Library does. If the two agree on which
@@ -600,27 +414,6 @@ export async function lookupEdition(
     data.heightMm ??= google.heightMm;
     data.publisher ??= google.publisher ?? ol.publisher;
     data.isbn ??= google.isbn ?? ol.isbn;
-  }
-
-  if (bestCatalogue?.sourceId) {
-    const url =
-      bestCatalogue.source === 'google'
-        ? googleCoverUrl(bestCatalogue.sourceId)
-        : /^\d+$/.test(bestCatalogue.sourceId)
-          ? olCoverUrl(bestCatalogue.sourceId)
-          : null;
-    if (url) {
-      const path = await storeCover(env, slug, url);
-      /* Fall back to the other catalogue's cover rather than none: a match
-         good enough to trust for a publisher is good enough for a picture,
-         and Open Library holds scans of old editions Google has no image
-         for at all. */
-      if (path) data.coverPath = path;
-      else if (bestCatalogue.source === 'google' && ol?.sourceId && /^\d+$/.test(ol.sourceId)) {
-        const alt = await storeCover(env, slug, olCoverUrl(ol.sourceId));
-        if (alt) data.coverPath = alt;
-      }
-    }
   }
 
   await writeCache(env, key, data);

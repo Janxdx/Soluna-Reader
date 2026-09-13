@@ -108,12 +108,12 @@ function costOf(method: string, path: string): Cost | null {
   }
 
   /* Catalogue lookups. The odd one out: everything else here rations our
-     own database, and this rations Open Library's, Google's and
-     Wikipedia's. A cache miss makes four outbound requests to services that
-     are free and run on donations, so the ceiling is not about protecting
-     this Worker — it is about not being the reason somebody else's service
-     starts refusing us. Tight, because a whole shelf is a few dozen
-     lookups once and nothing after that. */
+     own database, and this rations Open Library's and Google's. A cache
+     miss makes up to two outbound requests to services that are free and
+     run on donations, so the ceiling is not about protecting this Worker —
+     it is about not being the reason somebody else's service starts
+     refusing us. Tight, because a whole shelf is a few dozen lookups once
+     and nothing after that. */
   /* Method-independent on purpose: it is a POST, and it must stay counted
      as a lookup rather than falling through to the generic write ceiling
      below, which is sized for /api/push. */

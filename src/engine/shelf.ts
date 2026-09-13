@@ -38,6 +38,13 @@ export interface ShelfRow {
     books each rendered face-on. */
 const MAX_RY = 30;
 
+/** The air between two spines, in px. Real books touch, but a row drawn
+    with none at all reads as one striped block rather than a line of
+    objects — the reference leaves this much, and so does a shelf where a
+    few books lean. Counted into a row's width so the fan and the board are
+    measured over what the row actually occupies. */
+export const SLOT_GAP = 2;
+
 /**
  * Where a book sits across the row decides how far it has turned — the
  * whole trick that makes a fanned shelf read as one photograph rather than
@@ -76,22 +83,24 @@ export function breakRows(
 
   for (const item of looks) {
     const w = item.look.width;
-    if (current.length > 0 && currentWidth + w > width) {
+    const gap = current.length > 0 ? SLOT_GAP : 0;
+    if (current.length > 0 && currentWidth + gap + w > width) {
       rows.push(current);
       current = [];
       currentWidth = 0;
     }
     current.push(item);
-    currentWidth += w;
+    currentWidth += (current.length > 1 ? SLOT_GAP : 0) + w;
   }
   if (current.length > 0) rows.push(current);
 
   return rows.map((row) => {
-    const rowWidth = row.reduce((sum, item) => sum + item.look.width, 0);
+    const rowWidth =
+      row.reduce((sum, item) => sum + item.look.width, 0) + SLOT_GAP * (row.length - 1);
     let x = 0;
     const books: Placed[] = row.map((item) => {
       const centre = x + item.look.width / 2;
-      x += item.look.width;
+      x += item.look.width + SLOT_GAP;
       /* rowWidth is never 0 — a row always holds at least one spine of
          positive width — so this never divides by zero. */
       const t = (2 * centre) / rowWidth - 1;

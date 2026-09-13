@@ -19,12 +19,15 @@ export interface Settings {
   keepAwake: boolean;
   pacer: PacerConfig;
   /** Whether the shelf tab is allowed to ask outside catalogues (Google
-      Books, Open Library, Wikipedia) for a book's cover and printing —
-      see engine/spine.ts and SHELF-3D.md. A hundred-book shelf opened for
-      the first time makes close to a hundred such requests, paced at one
-      a second, so this is real consent rather than a display preference
-      and lives here rather than in the tab's own state for the same
-      reason: resetting it on every visit would make it feel like a toy. */
+      Books, Open Library) for a book's printing — publisher, page count,
+      year. The cover itself is never one of these any more: every spine
+      is drawn from the EPUB's own cover, which needs no network and no
+      consent at all. See engine/spine.ts, meta/editions.ts and
+      SHELF-3D.md. A hundred-book shelf opened for the first time still
+      makes close to a hundred metadata requests, paced at one a second,
+      so this is real consent rather than a display preference and lives
+      here rather than in the tab's own state for the same reason:
+      resetting it on every visit would make it feel like a toy. */
   lookupCoversOnline: boolean;
 
   set<K extends keyof Settings>(key: K, value: Settings[K]): void;

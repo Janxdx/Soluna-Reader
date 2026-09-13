@@ -141,18 +141,9 @@ export interface EditionData {
       a data URL, used only where no livery applies; see
       meta/palette.ts:extractEdgeStrip and spineLook */
   edgeTexture?: string;
-  wiki?: WikiSummary;
   /** how sure the match was, 0–1. Kept so a wrong cover is diagnosable
       rather than mysterious — the client shows it nowhere yet. */
   score?: number;
-}
-
-export interface WikiSummary {
-  /** the language actually answered in, which may not be the one asked for */
-  lang: string;
-  title: string;
-  extract: string;
-  url: string;
 }
 
 /* ── matching ──────────────────────────────────────────────────────

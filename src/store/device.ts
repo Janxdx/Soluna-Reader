@@ -24,6 +24,7 @@ import {
 } from '../db';
 import {
   bodyPages,
+  clampGeometry,
   findMatch,
   pageToPercent,
   pagesToWords,
@@ -135,9 +136,11 @@ export const useDevice = create<DeviceState>((set, get) => ({
       id,
       title: input.title.trim(),
       author: (input.author ?? '').trim(),
-      pages: Math.max(1, Math.round(input.pages)),
-      startPage: Math.max(1, Math.round(input.startPage ?? 1)),
-      currentPage: Math.max(0, Math.round(input.currentPage ?? 0)),
+      ...clampGeometry({
+        pages: input.pages,
+        startPage: input.startPage ?? 1,
+        currentPage: input.currentPage ?? 0,
+      }),
       device: input.device?.trim() || undefined,
       addedAt: now,
       updatedAt: now,
@@ -149,35 +152,83 @@ export const useDevice = create<DeviceState>((set, get) => ({
     if (match) record.bookId = match;
 
     await db.deviceBooks.put(record);
-    // a book can arrive already partway read — a linked pick from the
-    // library, or a starting page typed in on the way — and that position
-    // is exactly what the library push exists to notice, same as any later
-    // update to it
-    if (record.bookId) await recomputeBook(id);
+
+    /* Both directions, in the order that makes each one correct.
+
+       You do not add a reader card for a book you have never opened. The
+       usual reason to add one is that you have been reading it *in the app*
+       and are now carrying on with it on paper — so the card starts where
+       the app left off, not at page zero, which is what it used to do and
+       which made the whole shelf look like it had lost your place. A page
+       typed in on the way is further along than the app whenever it is
+       further along, and `adoptPosition` is forward-only, so it wins.
+
+       Then the push the other way, because the card may be the one that is
+       ahead. */
+    if (record.bookId) {
+      await adoptPosition(record);
+      await recomputeBook(id);
+    }
     await get().load();
+    await useLibrary.getState().load();
     changed();
     return id;
   },
 
   async updateBook(id, patch) {
-    const next = { ...patch, updatedAt: Date.now() };
+    const prev = await db.deviceBooks.get(id);
+    if (!prev) return;
+
+    const geometry =
+      patch.pages != null || patch.startPage != null || patch.currentPage != null;
+
+    const next: Partial<DeviceBookRecord> = { ...patch, updatedAt: Date.now() };
+    /* Re-clamp the whole triple, not just the field that was touched:
+       halving the page count can put the current page past the end without
+       anyone typing a current page at all. */
+    if (geometry) {
+      Object.assign(
+        next,
+        clampGeometry({
+          pages: patch.pages ?? prev.pages,
+          startPage: patch.startPage ?? prev.startPage,
+          currentPage: patch.currentPage ?? prev.currentPage,
+        })
+      );
+    }
+
+    /* A correction is not reading, and this is the distinction the shelf was
+       missing.
+
+       `recomputeBook` moves the library position forward only, which is
+       right for a session: reading thirty pages on the Kindle should never
+       rewind where the app thinks you are. But the numbers those pages are
+       measured against are typed in by hand and *get corrected*, and under a
+       forward-only rule a correction can only ever be applied when it
+       happens to make the number bigger. Tell the app a 300-page paperback
+       is really 400 pages and page 200 stops being two thirds and becomes a
+       half — and the library kept the two thirds, for ever, because two
+       thirds is further. Worse, the push back the other way then dragged the
+       card itself from page 200 to page 267 to match a figure that was only
+       ever derived from the count you had just disowned.
+
+       So a geometry change carries what the position looked like *before*
+       it. If the library is still sitting on that figure, the library is
+       holding this card's own arithmetic and the card is entitled to redo
+       it in either direction. If it has moved on since — you read further in
+       the app — it is not ours to rewrite, and forward-only still holds. */
+    const rebase = geometry
+      ? {
+          percent: pageToPercent(prev, prev.currentPage),
+          tolerance: 1 / bodyPages(prev) + 0.0005,
+        }
+      : undefined;
+
     await db.deviceBooks.update(id, next);
 
-    /* Changing the page count changes what every past session meant, and
-       moving the current page — whether typed or set from a scan, e.g. the
-       standalone "Scan my page" button, which patches only `currentPage`/
-       `currentLocus` and never touches a session — is itself the position
-       the library push in `recomputeBook` exists to notice. Recomputing on
-       any of the four keeps the two rules from stage 1 and stage 2 in sync
-       with what actually changed, rather than silently skipping the push
-       whenever nothing about the book's *geometry* changed. */
-    if (
-      patch.pages != null ||
-      patch.startPage != null ||
-      patch.bookId !== undefined ||
-      patch.currentPage != null
-    ) {
-      await recomputeBook(id);
+    if (geometry || patch.bookId !== undefined) {
+      await recomputeBook(id, rebase && { rebase });
+      await useLibrary.getState().load();
     }
     await get().load();
     changed();
@@ -197,6 +248,8 @@ export const useDevice = create<DeviceState>((set, get) => ({
       linkPinned: true,
       updatedAt: Date.now(),
     });
+    const linked = await db.deviceBooks.get(id);
+    if (linked) await adoptPosition(linked);
     await recomputeBook(id);
     await get().load();
     await useLibrary.getState().load();
@@ -212,6 +265,7 @@ export const useDevice = create<DeviceState>((set, get) => ({
       const match = findMatch(b, candidates);
       if (!match) continue;
       await db.deviceBooks.update(b.id, { bookId: match, updatedAt: Date.now() });
+      await adoptPosition({ ...b, bookId: match });
       await recomputeBook(b.id);
       linked++;
     }
@@ -233,7 +287,10 @@ export const useDevice = create<DeviceState>((set, get) => ({
       startedAt: now,
       accumulatedMs: 0,
       runningSince: now,
-      fromPage: fromPage ?? book?.currentPage ?? Math.max(0, (book?.startPage ?? 1) - 1),
+      /* `||`, not `??`: a current page of 0 means the book has not been
+         started, and starting the timer on a book whose body begins at page
+         17 must not credit you with the sixteen pages of front matter. */
+      fromPage: fromPage ?? (book?.currentPage || Math.max(0, (book?.startPage ?? 1) - 1)),
     };
     await writeTimer(timer);
     set({ timer, lastSync: null });
@@ -287,7 +344,11 @@ export const useDevice = create<DeviceState>((set, get) => ({
     const book = await db.deviceBooks.get(deviceBookId);
     if (!book) return;
 
-    const from = Math.max(0, Math.round(fromPage));
+    /* Clamped against the book at both ends. An unclamped `from` past the
+       last page — which a page-count correction can leave behind in a timer
+       that was already running — made `to - from` negative, and a session of
+       minus two hundred pages then travelled all the way into the totals. */
+    const from = Math.min(book.pages, Math.max(0, Math.round(fromPage)));
     /* a scan match is the real stopping point; the typed page number is
        only ever a fallback for it, so when both are present the locus wins */
     const rawTo = toLocus ? percentToPage(book, toLocus.percent) : Math.round(toPage);
@@ -342,20 +403,7 @@ export const useDevice = create<DeviceState>((set, get) => ({
     if (!linked.length) return;
 
     let moved = false;
-    for (const book of linked) {
-      const target = percentToPage(book, locus.percent);
-      // forward-only, same rule as recomputeBook's device→library push —
-      // reading further in the app pulls the reader card along, never back
-      if (target > book.currentPage) {
-        await db.deviceBooks.update(book.id, {
-          currentPage: target,
-          currentLocus: locus,
-          updatedAt: Date.now(),
-          ...(target >= book.pages ? { finishedAt: Date.now() } : {}),
-        });
-        moved = true;
-      }
-    }
+    for (const book of linked) moved = (await carryForward(book, locus)) || moved;
     if (moved) {
       await get().load();
       changed();
@@ -396,6 +444,37 @@ async function writeTimer(t: TimerState | null): Promise<void> {
   else await db.settings.delete(TIMER_KEY);
 }
 
+/**
+ * Move a reader card to a library position, forward only.
+ *
+ * The same rule as `recomputeBook`'s push in the other direction, and for
+ * the same reason: two halves of one habit, each free to be the one that is
+ * ahead, neither allowed to rewind the other.
+ */
+async function carryForward(book: DeviceBookRecord, locus: Locus): Promise<boolean> {
+  const target = percentToPage(book, locus.percent);
+  if (target <= book.currentPage) return false;
+  await db.deviceBooks.update(book.id, {
+    currentPage: target,
+    currentLocus: locus,
+    updatedAt: Date.now(),
+    ...(target >= book.pages ? { finishedAt: Date.now() } : {}),
+  });
+  return true;
+}
+
+/** Start a newly linked card wherever the app had already got to. */
+async function adoptPosition(book: DeviceBookRecord): Promise<boolean> {
+  if (!book.bookId) return false;
+  const p = await db.progress.get(book.bookId);
+  if (!p) return false;
+  return carryForward(book, {
+    spineIndex: p.spineIndex,
+    wordIndex: p.wordIndex,
+    percent: p.percent,
+  });
+}
+
 const libraryCandidates = () =>
   useLibrary.getState().books.map((b) => ({
     id: b.id,
@@ -411,6 +490,15 @@ export interface Receipt {
   moved: boolean;
 }
 
+/** What the library position looked like under the geometry we just
+    replaced, and how close a figure counts as being that one. See the long
+    note in `updateBook` — this is the evidence that lets a correction move
+    the position down as well as up. */
+export interface Rebase {
+  percent: number;
+  tolerance: number;
+}
+
 /**
  * Rebuild everything derived from one reader book: the word value of each
  * session, its mirror in the library's history, and the reading position.
@@ -420,7 +508,10 @@ export interface Receipt {
  * a derivation you can re-run from scratch can never drift out of step with
  * what it was derived from.
  */
-export async function recomputeBook(deviceBookId: string): Promise<Receipt | null> {
+export async function recomputeBook(
+  deviceBookId: string,
+  opts?: { rebase?: Rebase }
+): Promise<Receipt | null> {
   const book = await db.deviceBooks.get(deviceBookId);
   if (!book) return null;
 
@@ -484,7 +575,20 @@ export async function recomputeBook(deviceBookId: string): Promise<Receipt | nul
   const current = await db.progress.get(book.bookId);
   const before = current?.percent ?? 0;
 
-  if (percent <= before + 0.0005) {
+  /* Nothing to say. Checked first, so a correction that happens to land
+     where the library already was is not reported as having moved it. */
+  if (Math.abs(percent - before) <= 0.0005) {
+    return { before, after: before, moved: false };
+  }
+
+  /* Backwards is allowed only when the figure we would be overwriting is
+     the one this card put there under the numbers it has just disowned.
+     Otherwise the app has read past it since, and forward-only stands. */
+  const ours =
+    opts?.rebase != null &&
+    Math.abs(before - opts.rebase.percent) <= opts.rebase.tolerance;
+
+  if (percent < before && !ours) {
     return { before, after: before, moved: false };
   }
 

@@ -89,7 +89,10 @@ export function RatingSheet({ open, subject, existing, dark, onClose }: Props) {
   /* The EPUB's own publisher and language, where there is an EPUB. Both
      beat what a catalogue guesses from a title: they describe the edition
      actually in hand. A device book linked to a library one counts as
-     having an EPUB, which is the point of the link. */
+     having an EPUB, which is the point of the link — and it is also
+     where the cover the EditionCard shows comes from: `resolvedBookId` is
+     the library book's own id, which may differ from `bookId` above when
+     the rating points at a device book only. */
   const edition = useMemo(() => {
     const lib = useLibrary.getState().books;
     const book = bookId ? lib.find((b) => b.id === bookId) : undefined;
@@ -97,8 +100,8 @@ export function RatingSheet({ open, subject, existing, dark, onClose }: Props) {
       ? useDevice.getState().books.find((d) => d.id === deviceBookId)
       : undefined;
     const linked = device?.bookId ? lib.find((b) => b.id === device.bookId) : undefined;
-    const meta = (book ?? linked)?.meta;
-    return { language: meta?.language, publisher: meta?.publisher };
+    const resolved = book ?? linked;
+    return { language: resolved?.meta.language, publisher: resolved?.meta.publisher, resolvedBookId: resolved?.id };
   }, [bookId, deviceBookId]);
 
   const patch = (p: Partial<Draft>) => setDraft((d) => ({ ...d, ...p }));
@@ -162,6 +165,7 @@ export function RatingSheet({ open, subject, existing, dark, onClose }: Props) {
           author={author}
           {...(edition.language ? { language: edition.language } : {})}
           {...(edition.publisher ? { publisher: edition.publisher } : {})}
+          {...(edition.resolvedBookId ? { bookId: edition.resolvedBookId } : {})}
         />
 
         <BookProgress stats={progress} />
