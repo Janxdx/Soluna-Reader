@@ -65,6 +65,7 @@ check('judged axes are kept', saved.axes.prose === 10 && saved.axes.ideas === 8)
 check('the note is trimmed', saved.note === 'The house is the world.');
 check('unset flags stay off the record', saved.favourite === undefined);
 
+const firstRatedAt = saved.ratedAt;
 const again = await useRatings.getState().rate({
   bookId: 'lib1',
   title: 'Piranesi',
@@ -76,8 +77,12 @@ check('re-rating the same book edits rather than duplicates', again === id);
 check('one row on the shelf, not two', (await db.ratings.toArray()).length === 1);
 saved = (await db.ratings.get(id))!;
 check('the new score wins', saved.overall === 8);
+/* `<=`, not `<`: both stamps are `Date.now()` and two fast calls land in
+   the same millisecond often enough to fail this at random. What is being
+   asserted is that re-rating did not *move* `ratedAt` forward. */
 check('but the date you formed the opinion is kept',
-  saved.ratedAt < saved.updatedAt);
+  saved.ratedAt <= saved.updatedAt && saved.ratedAt === firstRatedAt,
+  `${saved.ratedAt} vs ${firstRatedAt}`);
 
 /* ── 2 ─ the store mirrors the database ──────────────────────────── */
 

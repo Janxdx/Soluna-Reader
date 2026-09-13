@@ -34,6 +34,47 @@ export interface Locus {
 
 const clamp01 = (n: number): number => (n < 0 ? 0 : n > 1 ? 1 : n);
 
+/* ── the three numbers, kept consistent ───────────────────────────── */
+
+export interface Geometry {
+  pages: number;
+  startPage: number;
+  currentPage: number;
+}
+
+/**
+ * The only combinations of the three page numbers that mean anything.
+ *
+ * Every derivation in this file divides by `bodyPages` or measures against
+ * `pages`, and each one is individually defensible about its own input while
+ * assuming the other two agree with it. They do not have to: the numbers are
+ * typed in by hand, into three separate boxes, about a book the app has
+ * never seen. A start page past the end collapses `bodyPages` to 1, which
+ * makes one reader page worth the entire novel and every session's word
+ * count absurd; a current page past the end pins the book at 100%, and
+ * because the library position only ever moves forward, that is permanent.
+ *
+ * Neither of those is a sum that went wrong — both are perfectly good
+ * arithmetic on a combination that cannot exist. So the combination is
+ * refused here, once, at the only door the three numbers come through,
+ * rather than defended against in each of the dozen places downstream.
+ *
+ * Clamping rather than rejecting: the reader is mid-correction, half-way
+ * through fixing a page count they know is wrong, and an error message that
+ * blocks the save would trap them in the bad state they are trying to leave.
+ */
+export function clampGeometry(g: Geometry): Geometry {
+  const pages = Math.max(1, Math.round(g.pages) || 1);
+  return {
+    pages,
+    startPage: Math.min(pages, Math.max(1, Math.round(g.startPage) || 1)),
+    /* 0 is "not started", and stays distinct from `startPage - 1`: the card
+       shows the start page until the first session, and a book whose body
+       begins on page 17 should not claim you have read 16 pages of it. */
+    currentPage: Math.min(pages, Math.max(0, Math.round(g.currentPage) || 0)),
+  };
+}
+
 /** Pages that actually hold body text. Always at least 1. */
 export const bodyPages = (b: PagedBook): number =>
   Math.max(1, b.pages - Math.max(1, b.startPage) + 1);

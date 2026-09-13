@@ -92,5 +92,82 @@ check('mirrors removed with the book', (await db.sessions.toArray()).length === 
 check('tombstones written for sync', (await db.tombstones.toArray()).length === 3,
   JSON.stringify((await db.tombstones.toArray()).map((t: any) => t.key)));
 
+/* ── 6 ─ the two halves of one habit ─────────────────────────────────
+
+   Everything below is about a reader card and a library book being the same
+   book read in two places, and the four ways that used to go wrong. */
+
+await db.books.put({
+  id: 'lib2',
+  meta: { title: 'Solaris', author: 'Stanislaw Lem', subjects: [] },
+  spine, toc: [], totalWords: 100_000, addedAt: Date.now(), hue: 5, updatedAt: Date.now(),
+});
+await useLibrary.getState().load();
+
+// 6a ─ a card added for a book you are already reading starts where you are
+await db.progress.put({ bookId: 'lib2', spineIndex: 1, wordIndex: 30_000, percent: 0.6, updatedAt: Date.now() });
+await useLibrary.getState().load();
+const solaris = await useDevice.getState().addBook({
+  title: 'Solaris', author: 'Stanislaw Lem', pages: 300,
+});
+book = (await db.deviceBooks.get(solaris))!;
+check('a new card starts at the app\u2019s position, not page zero',
+  book.currentPage === 180, `page ${book.currentPage}`);
+check('and the library store was told, not just the database',
+  useLibrary.getState().progress['lib2']?.percent === 0.6);
+
+// 6b ─ correcting the length re-derives the position instead of keeping the
+//      figure the old length produced
+await useDevice.getState().updateBook(solaris, { currentPage: 200 });
+check('typing a page moves the library forward',
+  Math.abs((await db.progress.get('lib2'))!.percent - 200 / 300) < 1e-9,
+  String((await db.progress.get('lib2'))!.percent));
+
+await useDevice.getState().updateBook(solaris, { pages: 400 });
+check('correcting the length downward-derives the library position',
+  Math.abs((await db.progress.get('lib2'))!.percent - 0.5) < 1e-9,
+  String((await db.progress.get('lib2'))!.percent));
+check('the library store sees the correction too',
+  Math.abs((useLibrary.getState().progress['lib2']?.percent ?? 0) - 0.5) < 1e-9);
+
+/* and the push back the other way must leave the page you typed alone —
+   this is the loop that used to drag page 200 up to 267 */
+const p2 = (await db.progress.get('lib2'))!;
+await useDevice.getState().pullFromLibrary('lib2', {
+  spineIndex: p2.spineIndex, wordIndex: p2.wordIndex, percent: p2.percent,
+});
+check('a corrected card is not dragged forward by its own old arithmetic',
+  (await db.deviceBooks.get(solaris))!.currentPage === 200,
+  `page ${(await db.deviceBooks.get(solaris))!.currentPage}`);
+
+// 6c ─ but reading further in the app is not ours to rewrite
+await db.progress.put({ bookId: 'lib2', spineIndex: 2, wordIndex: 0, percent: 0.9, updatedAt: Date.now() });
+await useDevice.getState().updateBook(solaris, { pages: 500 });
+check('a correction does not rewind progress the app made on its own',
+  (await db.progress.get('lib2'))!.percent === 0.9,
+  String((await db.progress.get('lib2'))!.percent));
+
+// 6d ─ impossible triples never reach the database
+await useDevice.getState().updateBook(solaris, { currentPage: 9000 });
+book = (await db.deviceBooks.get(solaris))!;
+check('a current page past the end is clamped on the way in',
+  book.currentPage === book.pages, `${book.currentPage}/${book.pages}`);
+
+await useDevice.getState().updateBook(solaris, { startPage: 9000 });
+book = (await db.deviceBooks.get(solaris))!;
+check('a body starting past the end is clamped too',
+  book.startPage === book.pages, `${book.startPage}/${book.pages}`);
+
+// 6e ─ a session that starts past the end is empty, not negative
+await useDevice.getState().updateBook(solaris, { pages: 300, startPage: 1, currentPage: 200 });
+await useDevice.getState().logManual({
+  deviceBookId: solaris, start: Date.now(), ms: 600_000, fromPage: 900, toPage: 950,
+});
+const stray = (await db.deviceSessions.where('deviceBookId').equals(solaris).toArray())[0];
+check('a session cannot cover a negative number of pages',
+  stray.pages >= 0, `${stray.fromPage}\u2192${stray.toPage} = ${stray.pages}`);
+check('nor can its mirror carry negative words',
+  (await db.sessions.toArray()).every((s: any) => s.words >= 0 && s.pages >= 0));
+
 console.log(fails === 0 ? '\nALL PASS' : `\n${fails} FAILURES`);
 process.exit(fails ? 1 : 0);

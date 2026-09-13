@@ -1152,6 +1152,16 @@ function EditForm({
   const [currentPage, setCurrentPage] = useState(String(book.currentPage));
   const [device, setDevice] = useState(book.device ?? '');
 
+  /* The store refuses a combination that cannot exist — a start page past
+     the end, a current page past the end — and quietly clamps it. Seed the
+     boxes from the saved record whenever it changes, so what you are looking
+     at is what the book actually says rather than what you typed at it. */
+  useEffect(() => {
+    setPages(String(book.pages));
+    setStartPage(String(book.startPage));
+    setCurrentPage(String(book.currentPage));
+  }, [book.pages, book.startPage, book.currentPage]);
+
   return (
     <div className="panel" style={{ marginTop: 16 }}>
       <h3>Details</h3>

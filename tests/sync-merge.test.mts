@@ -271,6 +271,59 @@ check('a server deletion removes the rating', !(await db.ratings.get('rt1')));
 
 /* ── 4 ─ the sync store starts clean ─────────────────────────────── */
 
+/* ── the exact position a card carries, which has no column on the wire ──
+
+   `currentLocus` is stamped by a scan or by a library pull and is more
+   precise than the page number. The merge writes device books with `put`,
+   which replaces the record, so an incoming row used to wipe it on every
+   sync — silently demoting an exact position to an estimate. It is kept when
+   it still describes the page the row carries, and dropped when it does not,
+   which is the same trust rule `recomputeBook` applies. */
+
+const cardRow = {
+  user_id: 'u1',
+  id: 'dev-locus',
+  title: 'Solaris',
+  author: 'Lem',
+  pages: 300,
+  start_page: 1,
+  current_page: 150,
+  book_id: null,
+  link_pinned: false,
+  device: null,
+  added_at: 1,
+  finished_at: null,
+  hue: 3,
+  updated_at: 100,
+  deleted: false,
+};
+
+await db.deviceBooks.put({
+  id: 'dev-locus',
+  title: 'Solaris',
+  author: 'Lem',
+  pages: 300,
+  startPage: 1,
+  currentPage: 150,
+  currentLocus: { spineIndex: 1, wordIndex: 4242, percent: 0.5 },
+  addedAt: 1,
+  hue: 3,
+  updatedAt: 50,
+});
+
+await merge({ ...emptyChanges(), deviceBooks: [cardRow] });
+check('an exact position survives a sync that agrees with it',
+  (await db.deviceBooks.get('dev-locus'))!.currentLocus?.wordIndex === 4242,
+  JSON.stringify((await db.deviceBooks.get('dev-locus'))!.currentLocus));
+
+await merge({
+  ...emptyChanges(),
+  deviceBooks: [{ ...cardRow, current_page: 30, updated_at: 200 }],
+});
+check('but is dropped when the row moved the page somewhere else',
+  (await db.deviceBooks.get('dev-locus'))!.currentLocus === undefined,
+  JSON.stringify((await db.deviceBooks.get('dev-locus'))!.currentLocus));
+
 check('sync starts idle', useSync.getState().status === 'idle');
 
 console.log(fails === 0 ? '\nALL PASS' : `\n${fails} FAILED`);
