@@ -43,6 +43,27 @@ export class EpubZip {
 }
 
 /** Resolve `href` against the directory of `base` (both zip-relative). */
+/**
+ * The anchor an href points at, without the '#'. Empty when there is none.
+ *
+ * `resolvePath` throws the fragment away, and has to: it answers "which file
+ * in the zip", and a zip has no entry called `chapter.xhtml#part-two`. But
+ * the fragment is the whole of what distinguishes one sub-section of a
+ * chapter from the next, so it is kept here instead of being lost.
+ */
+export function fragmentOf(href: string): string {
+  const at = href.indexOf('#');
+  if (at < 0) return '';
+  const raw = href.slice(at + 1);
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    /* a percent sign that isn't an escape — rare, and the raw text is a
+       better guess at the id than nothing at all */
+    return raw;
+  }
+}
+
 export function resolvePath(base: string, href: string): string {
   if (/^[a-z]+:/i.test(href)) return href; // absolute URL, leave alone
   const clean = href.split('#')[0];

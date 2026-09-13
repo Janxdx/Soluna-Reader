@@ -5,12 +5,14 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import { db, type BookRecord } from '../db';
 import { EpubZip } from '../engine/epub/zip';
 import { sanitizeChapter } from '../engine/sanitize';
-import { tokenizeInto } from '../engine/tokenize';
+import { tokenizeInto, wordAtAnchor } from '../engine/tokenize';
+import type { TocEntry } from '../engine/types';
 import { gutterFor, measure, pageOf, scrollToPage, type Geometry } from '../engine/paginate';
 import { Pacer } from '../engine/pacer';
 import { useSettings } from '../store/settings';
@@ -50,6 +52,10 @@ export function Reader({ bookId, onClose }: { bookId: string; onClose: () => voi
   const [ready, setReady] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
   const [wordIndex, setWordIndex] = useState(0);
+  /* where each of this chapter's contents anchors fell, in words. Resolved
+     once per render of a chapter and used to light up the entry you are
+     actually inside, rather than every sub-section of the chapter at once. */
+  const [anchorWords, setAnchorWords] = useState<Record<string, number>>({});
 
   const viewportRef = useRef<HTMLDivElement>(null);
   const columnsRef = useRef<HTMLDivElement>(null);
@@ -60,6 +66,9 @@ export function Reader({ bookId, onClose }: { bookId: string; onClose: () => voi
   const wordRef = useRef(0);
   const litRef = useRef(-1);
   const startWordRef = useRef(0);
+  /* a contents anchor to land on once the chapter has rendered; it can only
+     be turned into a word index after the spans exist, so it waits here */
+  const startAnchorRef = useRef('');
   const landOnEndRef = useRef(false);
   const bookRef = useRef<BookRecord | null>(null);
   const spineRef = useRef(0);
@@ -239,10 +248,26 @@ export function Reader({ bookId, onClose }: { bookId: string; onClose: () => voi
     spansRef.current = Array.from(el.querySelectorAll<HTMLElement>('.w'));
     litRef.current = -1;
 
-    const start = Math.min(startWordRef.current, Math.max(0, spansRef.current.length - 1));
+    const last = Math.max(0, spansRef.current.length - 1);
+    const anchor = startAnchorRef.current;
+    const fromAnchor = anchor ? wordAtAnchor(el, anchor) : null;
+    const start = Math.min(fromAnchor ?? startWordRef.current, last);
     const toEnd = landOnEndRef.current;
     startWordRef.current = 0;
+    startAnchorRef.current = '';
     landOnEndRef.current = false;
+
+    /* Every contents entry that points into this chapter, placed. Cheap —
+       one pass over the spans per entry, only for entries that have an
+       anchor — and it is what lets the contents sheet track where you are
+       within a chapter instead of just which chapter you are in. */
+    const placed: Record<string, number> = {};
+    for (const entry of book.toc) {
+      if (entry.spineIndex !== spineIndex || !entry.fragment) continue;
+      const at = wordAtAnchor(el, entry.fragment);
+      if (at != null) placed[entry.fragment] = at;
+    }
+    setAnchorWords(placed);
 
     relayout(start, toEnd);
     if (jumpRef.current) {
@@ -316,6 +341,44 @@ export function Reader({ bookId, onClose }: { bookId: string; onClose: () => voi
       return true;
     },
     []
+  );
+
+  /**
+   * Go to a contents entry — which, unlike going to a chapter, may not move
+   * you to a different file at all.
+   *
+   * Two things had to change for sub-sections to be reachable. A chapter's
+   * sub-sections share its `href` and differ only by fragment, so the entry's
+   * anchor has to travel with the navigation and be resolved against the
+   * spans once they exist. And `goChapter` alone cannot do it: it works by
+   * setting `spineIndex`, and setting state to the value it already holds
+   * renders nothing — so every entry inside the chapter you are already
+   * reading did precisely nothing when tapped, which is the shape the bug
+   * actually took.
+   */
+  const goToc = useCallback(
+    (entry: TocEntry) => {
+      if (entry.spineIndex < 0) return;
+
+      if (entry.spineIndex !== spineRef.current) {
+        startAnchorRef.current = entry.fragment ?? '';
+        goChapter(entry.spineIndex, 0, false, true);
+        return;
+      }
+
+      const el = columnsRef.current;
+      const at = el && entry.fragment ? wordAtAnchor(el, entry.fragment) : 0;
+      if (at == null) return;
+
+      /* Same banking as a jump between chapters: leaping to the end of a
+         long chapter must not credit those words as read in the instant the
+         leap took. */
+      flushSessionRef.current();
+      relayout(at);
+      sessionRef.current.startWords = globalWords(spineRef.current, wordRef.current);
+      sessionRef.current.pages = 0;
+    },
+    [goChapter, relayout, globalWords]
   );
 
   const turn = useCallback(
@@ -596,7 +659,27 @@ export function Reader({ bookId, onClose }: { bookId: string; onClose: () => voi
   const percent = book
     ? Math.min(1, globalWords(spineIndex, wordIndex) / (book.totalWords || 1))
     : 0;
+  /* The deepest contents entry you are past, not merely the chapter you are
+     in: with sub-sections navigable, "on" has to mean one row. Entries are
+     in reading order, so the last one that starts at or before here wins. */
+  const activeToc = useMemo(() => {
+    if (!book) return -1;
+    let best = -1;
+    for (let i = 0; i < book.toc.length; i++) {
+      const entry = book.toc[i];
+      if (entry.spineIndex < 0 || entry.spineIndex > spineIndex) continue;
+      if (entry.spineIndex < spineIndex) {
+        best = i;
+        continue;
+      }
+      const at = entry.fragment ? anchorWords[entry.fragment] : 0;
+      if (at != null && at <= wordIndex) best = i;
+    }
+    return best;
+  }, [book, spineIndex, wordIndex, anchorWords]);
+
   const chapterTitle =
+    (activeToc >= 0 ? book?.toc[activeToc]?.label : undefined) ??
     book?.toc.slice().reverse().find((t) => t.spineIndex >= 0 && t.spineIndex <= spineIndex)
       ?.label ?? `Chapter ${spineIndex + 1}`;
 
@@ -772,23 +855,34 @@ export function Reader({ bookId, onClose }: { bookId: string; onClose: () => voi
         <div className="eyebrow" style={{ marginBottom: 14 }}>
           Contents
         </div>
-        {book?.toc.map((entry, i) => (
-          <button
-            key={`${entry.href}-${i}`}
-            className={`toc-item${entry.spineIndex === spineIndex ? ' on' : ''}`}
-            style={{ paddingLeft: 12 + entry.depth * 14 }}
-            onClick={() => {
-              if (entry.spineIndex >= 0) {
+        {book?.toc.map((entry, i) =>
+          entry.spineIndex < 0 ? (
+            /* a heading in the contents with nothing behind it — a part
+               title, usually. Rendering it as a button that does nothing
+               when tapped is worse than not rendering it as one. */
+            <div
+              key={`${entry.href}-${i}`}
+              className="toc-item"
+              style={{ ...tocIndent(entry), opacity: 0.5 }}
+            >
+              {entry.label}
+            </div>
+          ) : (
+            <button
+              key={`${entry.href}-${i}`}
+              className={`toc-item${i === activeToc ? ' on' : ''}`}
+              style={tocIndent(entry)}
+              onClick={() => {
                 pacer.pause();
                 setPlaying(false);
-                goChapter(entry.spineIndex, 0, false, true);
-              }
-              setToc(false);
-            }}
-          >
-            {entry.label}
-          </button>
-        ))}
+                goToc(entry);
+                setToc(false);
+              }}
+            >
+              {entry.label}
+            </button>
+          )
+        )}
       </Sheet>
 
       <Sheet open={prefs} onClose={() => setPrefs(false)}>
@@ -796,4 +890,15 @@ export function Reader({ bookId, onClose }: { bookId: string; onClose: () => voi
       </Sheet>
     </div>
   );
+}
+
+/* Contents entries are nested, and now that the nested ones go somewhere the
+   nesting has to read as nesting: stepped in, and set a shade smaller so a
+   sub-section is visibly subordinate to the chapter above it rather than
+   just further right. */
+function tocIndent(entry: TocEntry): CSSProperties {
+  return {
+    paddingLeft: 12 + entry.depth * 16,
+    fontSize: entry.depth > 0 ? 13 : 14,
+  };
 }

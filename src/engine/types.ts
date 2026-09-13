@@ -19,7 +19,12 @@ export interface SpineEntry {
 
 export interface TocEntry {
   label: string;
-  href: string; // zip-relative, may include #fragment
+  href: string; // zip-relative, without the fragment
+  /** the part after '#', without it — the anchor inside the chapter that this
+      entry actually points at. Sub-sections of a chapter all share one
+      `href`; the fragment is the only thing that tells them apart.
+      Optional because books synced before it existed have no such field. */
+  fragment?: string;
   spineIndex: number; // -1 if unresolved
   depth: number;
 }

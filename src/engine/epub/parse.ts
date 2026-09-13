@@ -1,5 +1,5 @@
 import type { BookMeta, ManifestItem, ParsedBook, SpineEntry, TocEntry } from '../types';
-import { EpubZip, mimeFor, resolvePath } from './zip';
+import { EpubZip, fragmentOf, mimeFor, resolvePath } from './zip';
 import { countWords } from '../tokenize';
 
 const XML = 'application/xml';
@@ -111,7 +111,13 @@ function readNav(zip: EpubZip, navPath: string, spine: SpineEntry[]): TocEntry[]
       const label = a?.textContent?.trim() ?? '';
       if (label) {
         const full = href ? resolvePath(navPath, href) : '';
-        out.push({ label, href: full, spineIndex: spineIndexOf(spine, full), depth });
+        out.push({
+          label,
+          href: full,
+          fragment: href ? fragmentOf(href) : '',
+          spineIndex: spineIndexOf(spine, full),
+          depth,
+        });
       }
       const sub = Array.from(li.children).find((c) => c.localName === 'ol');
       if (sub) walk(sub, depth + 1);
@@ -134,7 +140,13 @@ function readNcx(zip: EpubZip, ncxPath: string, spine: SpineEntry[]): TocEntry[]
       const href = tags(p, 'content')[0]?.getAttribute('src') ?? '';
       const full = href ? resolvePath(ncxPath, href) : '';
       if (label) {
-        out.push({ label, href: full, spineIndex: spineIndexOf(spine, full), depth });
+        out.push({
+          label,
+          href: full,
+          fragment: href ? fragmentOf(href) : '',
+          spineIndex: spineIndexOf(spine, full),
+          depth,
+        });
       }
       walk(p, depth + 1);
     }
@@ -217,6 +229,7 @@ export async function parseEpub(data: ArrayBuffer): Promise<{
       label: `Chapter ${i + 1}`,
       href: s.href,
       spineIndex: i,
+      fragment: '',
       depth: 0,
     }));
   }
