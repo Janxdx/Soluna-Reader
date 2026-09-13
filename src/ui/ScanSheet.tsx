@@ -21,8 +21,21 @@ import type { PassageMatch } from '../engine/passage';
 import { MIN_TOKENS } from '../engine/passage';
 import type { Locus } from '../engine/device';
 import type { SpineEntry } from '../engine/types';
-import { excerptFor, locate, openScan, ScanUnavailable, type Scan } from '../scan/session';
-import { liveTextLikely, recognizeImage, type ScanStage } from '../ocr/recognize';
+import {
+  excerptFor,
+  locate,
+  openScan,
+  scanLanguage,
+  ScanUnavailable,
+  type Scan,
+} from '../scan/session';
+import {
+  DEFAULT_LANG,
+  isNonDefault,
+  liveTextLikely,
+  recognizeImage,
+  type ScanStage,
+} from '../ocr/recognize';
 import { Sheet } from './Sheet';
 import { IconCheck, IconClose, IconImage } from './Icons';
 
@@ -80,9 +93,15 @@ export function ScanPanel({
   const [searched, setSearched] = useState(false);
   const [excerpt, setExcerpt] = useState<{ text: string; markAt: number } | null>(null);
   const [applying, setApplying] = useState(false);
+  /* Which traineddata the photo path should load. Held in state rather than
+     read at the moment of capture, because looking it up is a database round
+     trip and the moment of capture is the one moment the reader is watching
+     a spinner. */
+  const [lang, setLang] = useState(DEFAULT_LANG);
 
   const scanRef = useRef<Scan | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const areaRef = useRef<HTMLTextAreaElement>(null);
   const liveText = useMemo(liveTextLikely, []);
 
   /* Reset on every open. A sheet that reopens holding the previous page's
@@ -95,7 +114,26 @@ export function ScanPanel({
     setExcerpt(null);
     setPhase({ k: 'idle' });
     scanRef.current = null;
+
+    let cancelled = false;
+    void scanLanguage(bookId).then((l) => {
+      if (!cancelled) setLang(l);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [open, bookId]);
+
+  /* On a device with Live Text the field *is* the feature, and the Scan Text
+     button only exists once the keyboard is up. Opening the panel with the
+     caret already in the box saves a tap that a reader who hasn't used this
+     before has no particular reason to know they need to make. Elsewhere the
+     field is the fallback path, so leave the keyboard alone. */
+  useEffect(() => {
+    if (!open || !liveText) return;
+    const t = setTimeout(() => areaRef.current?.focus(), 260);
+    return () => clearTimeout(t);
+  }, [open, liveText]);
 
   const ensureScan = useCallback(async (): Promise<Scan> => {
     if (scanRef.current) return scanRef.current;
@@ -170,9 +208,10 @@ export function ScanPanel({
     if (!file) return;
     setPhase({ k: 'reading', stage: 'loading', progress: 0 });
     try {
-      const read = await recognizeImage(file, (stage, progress) =>
-        setPhase({ k: 'reading', stage, progress })
-      );
+      const read = await recognizeImage(file, {
+        lang,
+        onProgress: (stage, progress) => setPhase({ k: 'reading', stage, progress }),
+      });
       setText(read.trim());
       setPhase(read.trim() ? { k: 'idle' } : { k: 'failed', message: 'No text found on that photo.' });
     } catch {
@@ -219,6 +258,7 @@ export function ScanPanel({
         <label className="field" style={{ marginTop: 18 }}>
           <span>Text from the page</span>
           <textarea
+            ref={areaRef}
             className="scan-area"
             value={text}
             onChange={(e) => setText(e.currentTarget.value)}
@@ -261,7 +301,9 @@ export function ScanPanel({
         {phase.k === 'reading' && (
           <div className="scan-note">
             {phase.stage === 'loading'
-              ? 'Loading the text recogniser (once per session)…'
+              ? isNonDefault(lang)
+                ? 'Loading the text recogniser and this book\u2019s language…'
+                : 'Loading the text recogniser (once per session)…'
               : `Reading the page… ${Math.round(phase.progress * 100)}%`}
           </div>
         )}
@@ -276,7 +318,9 @@ export function ScanPanel({
           <div className="scan-note">
             No confident match. That can mean the words came out garbled, or
             that the page repeats text found elsewhere in the book — try a
-            different page, or a fuller one.
+            different page, or a fuller one. A photograph of both pages at
+            once is read as two columns, so it is worth checking the text
+            above reads in order.
           </div>
         )}
 

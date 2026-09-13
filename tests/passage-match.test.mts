@@ -46,6 +46,9 @@ eq('dialogue in caps survives mid-page',
 
 eq('hyphen rejoined', dehyphenate('impor-\ntant'), 'important');
 eq('real line break kept', dehyphenate('wall\nthere'), 'wall\nthere');
+eq('sharp s rejoined', dehyphenate('schlie-\nßen'), 'schließen');
+eq('umlaut rejoined', dehyphenate('Wörter-\nbuch'), 'Wörterbuch');
+eq('a capital continuation is a real compound', dehyphenate('Berlin-\nBrandenburg'), 'Berlin-\nBrandenburg');
 
 /* ── index parity with the rest of the app ─────────────────────────── */
 

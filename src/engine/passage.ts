@@ -201,9 +201,16 @@ export function stripFurniture(text: string): string {
 
 /** Rejoin a word a line break split in half. Printed text hyphenates
     constantly and OCR keeps the hyphen, so without this every page loses
-    a handful of its most distinctive words. */
+    a handful of its most distinctive words.
+
+    Unicode classes, not `[A-Za-z]`: German breaks after ö and ß as readily
+    as after o and s, and an ASCII-only rule left exactly those words —
+    "Grö-ßte", "schlie-ßen" — split into two tokens on the OCR side and whole
+    on the book's, which misaligns everything after them. The continuation
+    still has to be lowercase, so a genuine compound across a break
+    ("Berlin-\nBrandenburg") is left as the author set it. */
 export function dehyphenate(text: string): string {
-  return text.replace(/([A-Za-z])[-‐‑­]\s*\n\s*([a-z])/g, '$1$2');
+  return text.replace(/(\p{L})[-‐‑­]\s*\n\s*(\p{Ll})/gu, '$1$2');
 }
 
 /* ── local alignment ───────────────────────────────────────────────── */

@@ -25,6 +25,7 @@ import {
   packedSize,
   unpackIndex,
 } from '../engine/passageStore';
+import { DEFAULT_LANG, tesseractLang } from '../ocr/language';
 import type { SpineEntry } from '../engine/types';
 
 /** Raised when the book cannot be searched, with a sentence worth showing. */
@@ -130,6 +131,28 @@ export async function excerptFor(
     return excerptAt(plainText(zip.text(entry.href)), match.locus.wordIndex);
   } catch {
     return null;
+  }
+}
+
+/**
+ * Which language to read this book's pages in.
+ *
+ * Lives here rather than in the OCR module because this is the layer that
+ * knows where a book is kept, and `meta.language` — the EPUB's own
+ * `dc:language`, parsed at import — is the only trustworthy answer available.
+ * Guessing from the recognised text is circular: you would need to have read
+ * the page correctly first.
+ *
+ * Never throws. A book that has gone missing between the sheet opening and
+ * this call is not a reason to refuse the scan; English is a fine assumption
+ * to fail back to, and the reader can still paste the text by hand.
+ */
+export async function scanLanguage(bookId: string): Promise<string> {
+  try {
+    const book = await db.books.get(bookId);
+    return tesseractLang(book?.meta.language);
+  } catch {
+    return DEFAULT_LANG;
   }
 }
 
