@@ -8,6 +8,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { elapsedOf, useDevice } from '../store/device';
 import { useLibrary } from '../store/library';
+import { useSync } from '../sync/sync';
 import { BookCover } from './BookCover';
 import { Sheet } from './Sheet';
 import {
@@ -16,6 +17,7 @@ import {
   IconLink,
   IconPause,
   IconPlay,
+  IconSync,
   IconPlus,
   IconStop,
   IconTimer,
@@ -116,12 +118,18 @@ export function Device() {
     logManual,
     removeSession,
     clearReceipt,
+    reconcile,
   } = useDevice();
   const library = useLibrary((s) => s.books);
   const progress = useLibrary((s) => s.progress);
   const covers = useLibrary((s) => s.covers);
 
   const [adding, setAdding] = useState(false);
+  /* null while idle, then the sentence describing what the last manual
+     reconciliation actually did — including when the answer is "nothing",
+     which is the one the button most needs to be able to say */
+  const [reconciled, setReconciled] = useState<string | null>(null);
+  const [reconciling, setReconciling] = useState(false);
   const [detailId, setDetailId] = useState<string | null>(null);
   const [finishing, setFinishing] = useState(false);
   const [, tick] = useState(0);
@@ -142,6 +150,29 @@ export function Device() {
     const id = window.setTimeout(clearReceipt, 6000);
     return () => window.clearTimeout(id);
   }, [lastSync, clearReceipt]);
+
+  useEffect(() => {
+    if (!reconciled) return;
+    const id = window.setTimeout(() => setReconciled(null), 6000);
+    return () => window.clearTimeout(id);
+  }, [reconciled]);
+
+  const syncWithLibrary = async (): Promise<void> => {
+    setReconciling(true);
+    try {
+      const { linked, moved } = await reconcile();
+      const parts: string[] = [];
+      if (linked) parts.push(`${linked} ${linked === 1 ? 'book' : 'books'} linked`);
+      if (moved) parts.push(`${moved} ${moved === 1 ? 'position' : 'positions'} caught up`);
+      setReconciled(parts.length ? parts.join(' \u00b7 ') : 'Already in step with your library.');
+      /* and, if this account syncs, ask the server too — the shelf being out
+         of date with the library and the device being out of date with the
+         account look identical from here, and the button should fix both */
+      void useSync.getState().syncNow();
+    } finally {
+      setReconciling(false);
+    }
+  };
 
   const byBook = useMemo(() => {
     const map: Record<string, typeof sessions> = {};
@@ -172,10 +203,26 @@ export function Device() {
               </p>
             )}
           </div>
-          <button className="btn primary" onClick={() => setAdding(true)}>
-            <IconPlus size={17} /> Track a book
-          </button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              className="btn ghost"
+              onClick={() => void syncWithLibrary()}
+              disabled={reconciling}
+              title="Re-link reader books to your library and carry both sides' positions across"
+            >
+              <IconSync size={16} /> {reconciling ? 'Syncing\u2026' : 'Sync with library'}
+            </button>
+            <button className="btn primary" onClick={() => setAdding(true)}>
+              <IconPlus size={17} /> Track a book
+            </button>
+          </div>
         </div>
+
+        {reconciled && (
+          <div className="scan-note" style={{ marginTop: 12 }}>
+            {reconciled}
+          </div>
+        )}
 
         {/* ── the running session ─────────────────────────────── */}
         {timer && timerBook && (

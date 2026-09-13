@@ -169,5 +169,45 @@ check('a session cannot cover a negative number of pages',
 check('nor can its mirror carry negative words',
   (await db.sessions.toArray()).every((s: any) => s.words >= 0 && s.pages >= 0));
 
+/* ── 7 ─ the manual catch-up ─────────────────────────────────────────
+
+   The automatic reconciliation fires at the moments someone thought of. This
+   is the button for the moments nobody did — a card added on one device for
+   a book imported on another, most often. */
+
+const orphan = await useDevice.getState().addBook({
+  title: 'Middlemarch', author: 'George Eliot', pages: 900,
+});
+check('a card for a book not in the library yet stays unlinked',
+  (await db.deviceBooks.get(orphan))!.bookId === undefined);
+
+await db.books.put({
+  id: 'lib3',
+  meta: { title: 'Middlemarch', author: 'George Eliot', subjects: [] },
+  spine, toc: [], totalWords: 100_000, addedAt: Date.now(), hue: 7, updatedAt: Date.now(),
+});
+await db.progress.put({ bookId: 'lib3', spineIndex: 0, wordIndex: 0, percent: 0.25, updatedAt: Date.now() });
+await useLibrary.getState().load();
+
+const result = await useDevice.getState().reconcile();
+check('reconcile links what the matcher can now see', result.linked === 1, JSON.stringify(result));
+book = (await db.deviceBooks.get(orphan))!;
+check('and the card catches up with the library',
+  book.bookId === 'lib3' && book.currentPage === 225, `${book.bookId} p.${book.currentPage}`);
+
+// and the other way: a card that is ahead pushes the library forward
+await useDevice.getState().updateBook(orphan, { currentPage: 450 });
+await db.progress.put({ bookId: 'lib3', spineIndex: 0, wordIndex: 0, percent: 0.25, updatedAt: Date.now() });
+await useLibrary.getState().load();
+const second = await useDevice.getState().reconcile();
+check('a card that is ahead pushes the library forward', second.moved > 0, JSON.stringify(second));
+check('the library landed on the card\u2019s position',
+  Math.abs((await db.progress.get('lib3'))!.percent - 450 / 900) < 1e-9,
+  String((await db.progress.get('lib3'))!.percent));
+
+const third = await useDevice.getState().reconcile();
+check('running it again changes nothing', third.linked === 0 && third.moved === 0,
+  JSON.stringify(third));
+
 console.log(fails === 0 ? '\nALL PASS' : `\n${fails} FAILURES`);
 process.exit(fails ? 1 : 0);

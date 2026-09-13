@@ -80,6 +80,8 @@ interface DeviceState {
   link(id: string, bookId: string | null): Promise<void>;
   /** run the matcher over every unpinned, unlinked book */
   autoLink(): Promise<number>;
+  /** redo the whole library↔shelf reconciliation by hand */
+  reconcile(): Promise<{ linked: number; moved: number }>;
 
   start(deviceBookId: string, fromPage?: number): Promise<void>;
   pause(): Promise<void>;
@@ -275,6 +277,41 @@ export const useDevice = create<DeviceState>((set, get) => ({
       changed();
     }
     return linked;
+  },
+
+  /**
+   * Everything the automatic reconciliation does, on demand.
+   *
+   * The two shelves keep each other up to date at the moments where it is
+   * obvious they should: a session is logged, a page is corrected, a chapter
+   * is read in the app. That covers the cases anyone thought of. It does not
+   * cover a book imported on one device and a reader card added on another,
+   * a sync that landed while a sheet was open, or any of the ways two
+   * devices and one account get out of step — and when it doesn't, the only
+   * repair available was to edit a page number to no purpose just to make
+   * something recompute.
+   *
+   * So: match every unlinked card, then push both directions for every
+   * linked one. Forward-only, deliberately — this is a catch-up, not a
+   * correction, and it is never the right moment to move anybody backwards.
+   * Safe to run at any time and safe to run twice, because every step it
+   * takes is one the app would have taken itself.
+   */
+  async reconcile() {
+    const linked = await get().autoLink();
+
+    let moved = 0;
+    for (const book of await db.deviceBooks.toArray()) {
+      if (!book.bookId) continue;
+      if (await adoptPosition(book)) moved++;
+      const receipt = await recomputeBook(book.id);
+      if (receipt?.moved) moved++;
+    }
+
+    await get().load();
+    await useLibrary.getState().load();
+    changed();
+    return { linked, moved };
   },
 
   /* ── timer ───────────────────────────────────────────────────── */
